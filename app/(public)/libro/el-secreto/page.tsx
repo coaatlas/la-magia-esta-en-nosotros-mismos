@@ -19,7 +19,7 @@ export default function ElSecretoPage() {
     title: "El Secreto",
     author: "Rhonda Byrne",
     description:
-      "El poder de la ley de atracción y cómo usarlo para transformar tu vida.",
+      "Próximamente disponible en nuestra plataforma",
     chapters: [
       {
         id: "cap1",
