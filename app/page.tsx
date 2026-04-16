@@ -25,9 +25,10 @@ type Book = {
   isPopular?: boolean;
   price?: {
     oneTime: number;
-    subscription: number;
+  
   };
   tags?: string[];
+  url?: string;
 };
 
 // ============ DATOS ============
@@ -43,21 +44,23 @@ const books: Book[] = [
     chapters: 28,
     rating: 4.9,
     isPopular: true,
-    price: { oneTime: 2999, subscription: 499 },
+    price: { oneTime: 1000},
     tags: ['Desarrollo Personal', 'Gratitud', 'Bestseller'],
+    url: '/libro/la-magia',
   },
   {
-    slug: 'otro-libro',
-    title: 'Otro Libro Increíble',
-    author: 'Otro Autor',
-    cover: '/covers/otro.jpg',
-    description: 'Descripción del segundo libro que captura la atención desde el primer capítulo y te lleva en un viaje inolvidable.',
+    slug: 'el-secreto',
+    title: 'El Secreto',
+    author: 'Rhonda Byrne',
+    cover: '/covers/secreto.webp',
+    description: 'El Secreto revela los principios universales que han sido conocidos por algunos, practicados por grandes maestros y ocultados al público durante siglos. Este audiolibro te guiará paso a paso para comprender y aplicar esta poderosa ley que puede transformar tu vida.',
     duration: '3h 45min',
     chapters: 15,
     rating: 4.7,
     isNew: true,
-    price: { oneTime: 1999, subscription: 399 },
+    price: { oneTime: 1000 },
     tags: ['Ficción', 'Aventura'],
+    url: '/libro/el-secreto',
   },
 ];
 
@@ -594,7 +597,7 @@ export default function HomePage() {
                     
                     return (
                       <motion.div key={book.slug} variants={itemVariants}>
-                        <Link href={`/libro/${book.slug}`} className="block group">
+                        <Link href={book.url || `/libro/${book.slug}`} className="block group">
                           <motion.article
                             whileHover={{ y: -4, transition: { duration: 0.2 } }}
                             className={`relative bg-white dark:bg-gray-800 rounded-2xl p-4 md:p-5 transition-all border ${
@@ -677,7 +680,7 @@ export default function HomePage() {
                                   {book.price && (
                                     <span className="flex items-center gap-1 font-medium text-amber-600 dark:text-amber-400">
                                       <Zap size={12} />
-                                      Desde {formatPrice(book.price.subscription)}/mes
+                                      {formatPrice(book.price.oneTime)} USD
                                     </span>
                                   )}
                                 </div>
