@@ -512,6 +512,10 @@ export default function BookDetailPage({ params }: { params: Promise<{ slug: str
       { id: 'cap20', title: 'Día 17 - El cheque mágico', duration: '6:26', durationSeconds: 386, src: '/audios/21_dia-17.mp3', isPreview: false },
       { id: 'cap21', title: 'Día 18 - La Lista Mágica de Tareas Pendientes', duration: '4:30', durationSeconds: 270, src: '/audios/22_dia-18.mp3', isPreview: false },
       { id: 'cap22', title: 'Día 19 - Pasos Mágicos', duration: '2:44', durationSeconds: 164, src: '/audios/23_dia-19.mp3', isPreview: false },
+      { id: 'cap23', title: 'Día 20 - La Magia del Corazón', duration: '3:48', durationSeconds: 260, src: '/audios/24_dia-20.mp3', isPreview: false },
+      { id: 'cap24', title: 'Día 21 - Magníficos Resultados', duration: '5:15', durationSeconds: 260, src: '/audios/25_dia-21.mp3', isPreview: false },
+      
+      
 
     ]
   };
@@ -1291,7 +1295,7 @@ export default function BookDetailPage({ params }: { params: Promise<{ slug: str
 
       {/* ===== FOOTER ===== */}
       <footer className="px-6 md:px-8 py-12 text-center text-gray-600 text-sm">
-        <p>© {new Date().getFullYear()} Tu Marca AR • Audiolibros Premium</p>
+        <p>© {new Date().getFullYear()} La Magia de la Gratitud • Audiolibros</p>
         <p className="mt-1 text-xs opacity-70">La magia está en vos ✨</p>
       </footer>
 
