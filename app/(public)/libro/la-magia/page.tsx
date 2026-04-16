@@ -514,6 +514,7 @@ export default function BookDetailPage({ params }: { params: Promise<{ slug: str
       { id: 'cap22', title: 'Día 19 - Pasos Mágicos', duration: '2:44', durationSeconds: 164, src: '/audios/23_dia-19.mp3', isPreview: false },
       { id: 'cap23', title: 'Día 20 - La Magia del Corazón', duration: '3:48', durationSeconds: 260, src: '/audios/24_dia-20.mp3', isPreview: false },
       { id: 'cap24', title: 'Día 21 - Magníficos Resultados', duration: '5:15', durationSeconds: 260, src: '/audios/25_dia-21.mp3', isPreview: false },
+      { id: 'cap25', title: 'Día 22 - Ante tus propios ojos', duration: '5:15', durationSeconds: 260, src: '/audios/26_dia-22.mp3', isPreview: false },
       
       
 
