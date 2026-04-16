@@ -81,6 +81,9 @@ export default function BookDetailPage({ params }: { params: Promise<{ slug: str
       { id: 'cap15', title: 'Día 12 - Personas Mágicas Importantes', duration: '4:45', durationSeconds: 285, src: '/audios/16_dia-12.mp3', isPreview: false },
       { id: 'cap16', title: 'Día 13 - Haz realidad tus deseos', duration: '6:11', durationSeconds: 371, src: '/audios/17_dia-13.mp3', isPreview: false },
       { id: 'cap17', title: 'Día 14 - Que tengas un día mágico', duration: '4:51', durationSeconds: 291, src: '/audios/18_dia-14.mp3', isPreview: false },
+      { id: 'cap18', title: 'Día 15 - Sana Mágicamente Tus Relaciones', duration: '5:22', durationSeconds: 322, src: '/audios/19_dia-15.mp3', isPreview: false },
+      
+      
 
     ]
   };
