@@ -1,14 +1,20 @@
 'use client';
 
-import { useState, useEffect, use, useCallback } from 'react';
+import { useState, useEffect, use, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Play, Lock, CheckCircle, Headphones, Zap, X,
   ChevronDown, ChevronUp, SkipBack, SkipForward,
-  Volume2, List, Info
+  Volume2, List, Info, CreditCard, Shield, Globe, Loader2, AlertCircle
 } from 'lucide-react';
 import AudioPlayer from '@/app/components/AudioPlayer';
 import { useToast } from '@/app/hooks/useToast';
+
+// PayPal SDK
+import { PayPalScriptProvider, PayPalButtons } from '@paypal/react-paypal-js';
+
+// MercadoPago SDK
+import { initMercadoPago, Wallet } from '@mercadopago/sdk-react';
 
 // ============ TIPOS ============
 
@@ -16,10 +22,10 @@ type Chapter = {
   id: string;
   title: string;
   duration: string;
-  durationSeconds?: number; // 👈 Nuevo: para cálculos precisos
+  durationSeconds?: number;
   src: string;
   isPreview: boolean;
-  description?: string; // 👈 Nuevo: para tooltips o expandir
+  description?: string;
 };
 
 type Book = {
@@ -30,11 +36,429 @@ type Book = {
   description: string;
   price: {
     oneTime: number;
-    subscription: number;
   };
   chapters: Chapter[];
-  totalDuration?: string; // 👈 Nuevo: para mostrar en hero
+  totalDuration?: string;
 };
+
+type PaymentMethodType = 'mercadopago' | 'paypal' | 'loading';
+
+// ============ UTILIDADES: DETECCIÓN DE PAÍS ============
+
+const MERCADOPAGO_COUNTRIES = ['AR', 'BR', 'CL', 'CO', 'MX', 'PE', 'UY', 'EC'];
+
+async function detectUserCountry(): Promise<{ country: string; useMercadoPago: boolean }> {
+  try {
+    const response = await fetch('https://ipapi.co/json/', {
+      headers: { 'Accept': 'application/json' },
+      cache: 'no-store'
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      const countryCode = data.country_code?.toUpperCase();
+      return {
+        country: countryCode || 'US',
+        useMercadoPago: MERCADOPAGO_COUNTRIES.includes(countryCode)
+      };
+    }
+  } catch (e) {
+    console.warn('⚠️ Geolocalización falló:', e);
+  }
+
+  // Fallback con locale del navegador
+  try {
+    const locale = navigator.language || (navigator as any).userLanguage;
+    const countryCode = locale.split('-')[1]?.toUpperCase() || locale.slice(0, 2).toUpperCase();
+    return {
+      country: countryCode,
+      useMercadoPago: MERCADOPAGO_COUNTRIES.includes(countryCode)
+    };
+  } catch {
+    return { country: 'AR', useMercadoPago: true };
+  }
+}
+
+// Hook personalizado
+function usePaymentMethod() {
+  const [paymentMethod, setPaymentMethod] = useState<{
+    type: PaymentMethodType;
+    country: string;
+  }>({ type: 'loading', country: 'AR' });
+
+  useEffect(() => {
+    let mounted = true;
+
+    detectUserCountry().then(({ country, useMercadoPago }) => {
+      if (mounted) {
+        setPaymentMethod({
+          type: useMercadoPago ? 'mercadopago' : 'paypal',
+          // type: 'paypal',
+          country
+        });
+      }
+    });
+
+    return () => { mounted = false; };
+  }, []);
+
+  return paymentMethod;
+}
+
+// ============ COMPONENTE DE PAGO INLINE ============
+
+function InlinePaymentGateway({
+  amount,
+  currency,
+  description,
+  onPaymentSuccess,
+  onPaymentError,
+  mode,
+  bookSlug
+}: {
+  amount: number;
+  currency: string;
+  description: string;
+  onPaymentSuccess: (paymentType: 'oneTime' | 'subscription') => Promise<void>;
+  onPaymentError?: (error: Error) => void;
+  mode: 'oneTime' | 'subscription';
+  bookSlug: string;
+}) {
+  const { success, error: showError, info } = useToast();
+  const paymentMethod = usePaymentMethod();
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [mpPreferenceId, setMpPreferenceId] = useState<string | null>(null);
+  const [showMpFallback, setShowMpFallback] = useState(false);
+
+  // Inicializar MercadoPago
+  useEffect(() => {
+    if (paymentMethod.type === 'mercadopago') {
+      initMercadoPago(process.env.NEXT_PUBLIC_MP_PUBLIC_KEY || '', {
+        locale: paymentMethod.country === 'BR' ? 'pt-BR' : 'es-AR'
+      });
+    }
+  }, [paymentMethod]);
+
+  // Crear preferencia de MercadoPago
+  // Dentro de InlinePaymentGateway component
+
+  const createMercadoPagoPreference = useCallback(async () => {
+    try {
+      // 🔥 PRECIO FIJO EN USD QUE QUERÉS COBRAR
+      const PRICE_USD = 10.00; // 👈 Esto es lo que querés: $10 USD
+
+      const response = await fetch('/api/mercadopago/create-preference', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: description,
+          priceUSD: PRICE_USD,
+          bookSlug: bookSlug
+        })
+      });
+
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        console.error('❌ API Error:', err);
+        showError(err.detail || 'Error al crear preferencia');
+        setShowMpFallback(true);
+        return null;
+      }
+
+      const { preferenceId, initPoint } = await response.json();
+
+      // 🔥 Redirección MANUAL a MercadoPago (más confiable)
+      if (initPoint) {
+        window.location.href = initPoint;
+        return preferenceId;
+      }
+
+      return preferenceId;
+
+    } catch (err: any) {
+      console.error('❌ Error MP:', err);
+      showError('Error con MercadoPago');
+      setShowMpFallback(true);
+      return null;
+    }
+  }, [description, bookSlug, showError]);
+  // Handlers de éxito
+  const handlePaymentComplete = async (provider: 'mercadopago' | 'paypal', paymentData: any) => {
+    try {
+      setIsProcessing(true);
+
+      // Verificar pago en backend
+      const endpoint = provider === 'mercadopago'
+        ? '/api/mercadopago/webhook'
+        : '/api/paypal/verify';
+
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          paymentId: paymentData.payment_id || paymentData.orderID,
+          status: paymentData.status || paymentData.status,
+          mode,
+          bookSlug
+        })
+      });
+
+      if (response.ok) {
+        // Guardar acceso en localStorage (en producción, usar DB + auth)
+        if (mode === 'oneTime') {
+          localStorage.setItem(`purchased_${bookSlug}`, 'true');
+        } else {
+          localStorage.setItem('subscription_active', 'true');
+        }
+
+        await onPaymentSuccess(mode);
+        success(`🎉 ¡Pago exitoso con ${provider === 'mercadopago' ? 'MercadoPago' : 'PayPal'}!`);
+      } else {
+        throw new Error('Verificación fallida');
+      }
+    } catch (err) {
+      console.error(`Error verificando pago ${provider}:`, err);
+      showError('Hubo un problema confirmando tu pago. Contactanos.');
+      onPaymentError?.(err as Error);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  // Sandbox mode para desarrollo
+  // const isSandbox = process.env.NODE_ENV === 'development';
+
+  const isSandbox = false;
+
+  const handleSandboxSuccess = async () => {
+    await new Promise(r => setTimeout(r, 1500));
+
+    if (mode === 'oneTime') {
+      localStorage.setItem(`purchased_${bookSlug}`, 'true');
+    } else {
+      localStorage.setItem('subscription_active', 'true');
+    }
+
+    await onPaymentSuccess(mode);
+    success('🧪 [SANDBOX] Pago simulado exitoso');
+  };
+
+  // Formatear precio
+  // Formatear precio para mostrar (ARS)
+  const formatAmount = () => {
+    // Si currency es USD, mostramos el equivalente en ARS
+    const displayAmount = currency === 'USD'
+      ? 10.00 * 1000 // 👈 Tasa de ejemplo: $10 USD = $10.000 ARS
+      : amount / 100;
+
+    return new Intl.NumberFormat('es-AR', {
+      style: 'currency',
+      currency: 'ARS',
+      minimumFractionDigits: 0
+    }).format(displayAmount);
+  };
+
+  // Loading state
+  if (paymentMethod.type === 'loading') {
+    return (
+      <div className="flex items-center justify-center py-8">
+        <Loader2 className="animate-spin text-amber-400" size={24} />
+        <span className="ml-3 text-gray-400 text-sm">Detectando método de pago...</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Badge de método seleccionado */}
+      <motion.div
+        initial={{ opacity: 0, y: -10 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="flex items-center justify-center gap-2 text-xs text-gray-400"
+      >
+        <Globe size={12} />
+        <span>
+          Método para tu región ({paymentMethod.country}):{' '}
+          <strong className="text-blue-400">
+            {paymentMethod.type === 'mercadopago' ? 'MercadoPago' : 'PayPal'}
+          </strong>
+        </span>
+      </motion.div>
+
+      {/* ===== MODO SANDBOX ===== */}
+      {isSandbox && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="p-3 bg-purple-500/20 border border-purple-500/40 rounded-xl"
+        >
+          <div className="flex items-center gap-2 text-purple-300 text-xs mb-2">
+            <Zap size={12} className="animate-pulse" />
+            <span>Modo Desarrollo • Pagos Simulados</span>
+          </div>
+          <button
+            onClick={handleSandboxSuccess}
+            disabled={isProcessing}
+            className="w-full py-2.5 bg-purple-500 hover:bg-purple-600 disabled:opacity-50 text-white font-semibold rounded-lg text-sm transition flex items-center justify-center gap-2"
+          >
+            {isProcessing ? <Loader2 className="animate-spin" size={16} /> : <CheckCircle size={16} />}
+            Simular Pago Exitoso ({formatAmount()})
+          </button>
+        </motion.div>
+      )}
+
+      {/* ===== MERCADOPAGO ===== */}
+      {!isSandbox && paymentMethod.type === 'mercadopago' && !showMpFallback && (
+        <motion.div
+          initial={{ opacity: 0, scale: 0.98 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="space-y-3"
+        >
+          <div className="p-4 bg-blue-500/10 border border-blue-500/30 rounded-xl">
+            <div className="flex items-center gap-2 text-blue-400 text-sm mb-2">
+              <Shield size={14} />
+              <span>Pago seguro con MercadoPago</span>
+            </div>
+            <p className="text-xs text-gray-400">
+              Aceptamos todas las tarjetas, efectivo en rapipago/pago fácil, y transferencia.
+            </p>
+          </div>
+
+          {/* Botón de checkout */}
+          <div className="flex justify-center">
+            {/* Botón de checkout con monto en ARS */}
+            <button
+              onClick={async () => {
+                const preferenceId = await createMercadoPagoPreference();
+                if (preferenceId) {
+                  window.location.href = `https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=${preferenceId}`;
+                }
+              }}
+              disabled={isProcessing}
+              className="w-full py-3 bg-[#009EE3] hover:bg-[#0088cc] disabled:opacity-50 text-white font-semibold rounded-xl transition flex items-center justify-center gap-2 shadow-lg"
+            >
+              {isProcessing ? (
+                <Loader2 className="animate-spin" size={18} />
+              ) : (
+                <CreditCard size={18} />
+              )}
+              Pagar con MercadoPago • {formatAmount()}
+            </button>
+          </div>
+
+          {/* Fallback manual */}
+          <button
+            onClick={() => setShowMpFallback(true)}
+            className="w-full py-2 text-xs text-blue-400 hover:text-blue-300 underline flex items-center justify-center gap-1"
+          >
+            <AlertCircle size={12} />
+            ¿Problemas? Abrir checkout en nueva ventana
+          </button>
+        </motion.div>
+      )}
+
+      {/* ===== PAYPAL ===== */}
+      {!isSandbox && paymentMethod.type === 'paypal' && (
+        <PayPalScriptProvider
+          options={{
+            clientId: process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID!,
+            currency: 'USD'
+          }}
+        >
+          <PayPalButtons
+            style={{
+              layout: 'vertical',
+              color: 'gold',
+              shape: 'rect',
+              label: 'pay'
+            }}
+            createOrder={async () => {
+              const res = await fetch('/api/paypal/create-order', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  amount: amount / 100, // 👈 USA EL PRECIO REAL
+                  currency: 'USD',
+                  description: description
+                })
+              });
+
+              const data = await res.json();
+              return data.orderID;
+            }}
+
+
+            onApprove={async (data, actions) => {
+              const details = await actions.order?.capture();
+
+              await handlePaymentComplete('paypal', {
+                orderID: data.orderID,
+                status: details?.status
+              });
+            }}
+
+            onError={(err) => {
+              console.error(err);
+
+              showError('❌ Error en PayPal. Intentá nuevamente o usá otro método.');
+            }}
+
+          />
+        </PayPalScriptProvider>
+      )}
+
+      {/* ===== FALLBACK MERCADOPAGO → PAYPAL ===== */}
+      <AnimatePresence>
+        {showMpFallback && paymentMethod.type === 'mercadopago' && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-xl"
+          >
+            <div className="flex items-start gap-3">
+              <AlertCircle className="text-amber-400 flex-shrink-0 mt-0.5" size={18} />
+              <div>
+                <p className="text-sm text-amber-300 font-medium mb-2">
+                  ¿Problemas con MercadoPago?
+                </p>
+                <p className="text-xs text-gray-400 mb-3">
+                  Podés intentar con PayPal como método alternativo.
+                </p>
+                <button
+                  onClick={() => {
+                    // Forzar recarga para detectar PayPal
+                    window.location.reload();
+                  }}
+                  className="text-xs text-amber-400 hover:text-amber-300 underline flex items-center gap-1"
+                >
+                  Intentar con PayPal
+                  <Globe size={10} />
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ===== INFO DE SEGURIDAD ===== */}
+      <div className="flex items-center justify-center gap-4 pt-4 border-t border-white/10 text-[10px] text-gray-500">
+        <div className="flex items-center gap-1">
+          <Lock size={10} />
+          <span>SSL Encriptado</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <Shield size={10} />
+          <span>{paymentMethod.type === 'mercadopago' ? 'MercadoPago' : 'PayPal'} Protegido</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <CreditCard size={10} />
+          <span>Sin almacenamos tus datos</span>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // ============ COMPONENTE PRINCIPAL ============
 
@@ -45,6 +469,7 @@ export default function BookDetailPage({ params }: { params: Promise<{ slug: str
   // Estados principales
   const [hasAccess, setHasAccess] = useState(false);
   const [showPaywall, setShowPaywall] = useState(false);
+  const [selectedPlan, setSelectedPlan] = useState<'oneTime' | 'subscription'>('oneTime');
   const [showTestPanel, setShowTestPanel] = useState(false);
   const [activeChapter, setActiveChapter] = useState<Chapter | null>(null);
   const [isPlayerExpanded, setIsPlayerExpanded] = useState(false);
@@ -59,7 +484,7 @@ export default function BookDetailPage({ params }: { params: Promise<{ slug: str
     author: "Rhonda Byrne",
     cover: "/covers/lamagia.webp",
     description: "¿Recuerdas cuando eras pequeño y creías que la vida era mágica? Pues bien, la magia de la vida es real, y es mucho más impresionante, imponente y apasionante de lo que jamás imaginaste de niño. Puedes vivir tus sueños, puedes tener todo lo que deseas, ¡y tu vida puede tocar el cielo! Te invito a que me acompañes en un inolvidable viaje de 28 días",
-    price: { oneTime: 2999, subscription: 499 },
+    price: { oneTime: 1000 },
     totalDuration: "2h 14min",
     chapters: [
       { id: 'palabras-iniciales', title: 'Una palabra', duration: '3:39', durationSeconds: 219, src: '/audios/0_una-palabra.mp3', isPreview: true, description: 'Introducción al poder de la gratitud' },
@@ -82,15 +507,16 @@ export default function BookDetailPage({ params }: { params: Promise<{ slug: str
       { id: 'cap16', title: 'Día 13 - Haz realidad tus deseos', duration: '6:11', durationSeconds: 371, src: '/audios/17_dia-13.mp3', isPreview: false },
       { id: 'cap17', title: 'Día 14 - Que tengas un día mágico', duration: '4:51', durationSeconds: 291, src: '/audios/18_dia-14.mp3', isPreview: false },
       { id: 'cap18', title: 'Día 15 - Sana Mágicamente Tus Relaciones', duration: '5:22', durationSeconds: 322, src: '/audios/19_dia-15.mp3', isPreview: false },
-      
-      
+      { id: 'cap19', title: 'Día 16 - Magia y Milagros en la Salud', duration: '5:47', durationSeconds: 322, src: '/audios/20_dia-16.mp3', isPreview: false },
+      { id: 'cap20', title: 'Día 17 - El cheque mágico', duration: '6:26', durationSeconds: 386, src: '/audios/21_dia-17.mp3', isPreview: false },
+      { id: 'cap21', title: 'Día 18 - La Lista Mágica de Tareas Pendientes', duration: '4:30', durationSeconds: 270, src: '/audios/22_dia-18.mp3', isPreview: false },
+      { id: 'cap22', title: 'Día 19 - Pasos Mágicos', duration: '2:44', durationSeconds: 164, src: '/audios/23_dia-19.mp3', isPreview: false },
 
     ]
   };
 
   // ============ EFECTOS ============
 
-  // Verificar acceso al montar
   useEffect(() => {
     const checkAccess = () => {
       try {
@@ -107,25 +533,63 @@ export default function BookDetailPage({ params }: { params: Promise<{ slug: str
     checkAccess();
   }, [book.slug]);
 
-  // Actualizar tiempo de reproducción (para sync con UI)
   const handleTimeUpdate = useCallback((time: number) => {
     setCurrentPlaybackTime(time);
   }, []);
 
-  // Después de setHasAccess(true) en cualquiera de las funciones:
-  setTimeout(() => {
-    // Animar los capítulos que antes estaban bloqueados
-    const lockedChapters = document.querySelectorAll('[id^="chapter-"]');
-    lockedChapters.forEach((el, idx) => {
-      const wasLocked = el.querySelector('svg[data-lucide="lock"]'); // o tu selector de candado
-      if (wasLocked) {
-        el.classList.add('ring-2', 'ring-green-400/50', 'animate-pulse');
-        setTimeout(() => {
-          el.classList.remove('ring-2', 'ring-green-400/50', 'animate-pulse');
-        }, 2000 + idx * 100);
+  // Animación post-pago (evitar ejecutar en SSR)
+  useEffect(() => {
+    if (hasAccess) {
+      const timer = setTimeout(() => {
+        const lockedChapters = document.querySelectorAll('[id^="chapter-"]');
+        lockedChapters.forEach((el, idx) => {
+          const wasLocked = el.querySelector('svg[data-lucide="lock"]');
+          if (wasLocked) {
+            el.classList.add('ring-2', 'ring-green-400/50', 'animate-pulse');
+            setTimeout(() => {
+              el.classList.remove('ring-2', 'ring-green-400/50', 'animate-pulse');
+            }, 2000 + idx * 100);
+          }
+        });
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [hasAccess]);
+
+  // Agregar dentro del componente BookDetailPage, junto a los otros useEffect:
+
+  useEffect(() => {
+    // 🔍 Detectar si el usuario volvió después de pagar
+    const urlParams = new URLSearchParams(window.location.search);
+    const paymentStatus = urlParams.get('payment');
+    const mode = urlParams.get('mode') as 'oneTime' | 'subscription' | null;
+
+    if (paymentStatus === 'success' && !hasAccess) {
+      console.log('✅ Pago exitoso detectado, otorgando acceso...');
+
+      // Otorgar acceso inmediatamente
+      if (mode === 'oneTime') {
+        localStorage.setItem(`purchased_${book.slug}`, 'true');
+      } else {
+        localStorage.setItem('subscription_active', 'true');
       }
-    });
-  }, 500);
+      setHasAccess(true);
+
+      // Limpiar la URL para que no se vea feo
+      window.history.replaceState({}, document.title, window.location.pathname);
+
+      // Mostrar mensaje de éxito
+      success('🎉 ¡Pago confirmado! Acceso desbloqueado.');
+
+      // Scroll suave hacia los capítulos
+      setTimeout(() => {
+        document.getElementById('catalogo')?.scrollIntoView({
+          behavior: 'smooth',
+          block: 'start'
+        });
+      }, 500);
+    }
+  }, [book.slug, hasAccess, success]);
 
   // ============ FUNCIONES DE ACCESO/PAGO ============
 
@@ -136,7 +600,6 @@ export default function BookDetailPage({ params }: { params: Promise<{ slug: str
       const originalText = btn.innerHTML;
       btn.innerHTML = '<span class="animate-pulse">Procesando...</span>';
 
-      // Simular delay de red
       await new Promise(resolve => setTimeout(resolve, 1200));
 
       try {
@@ -146,30 +609,9 @@ export default function BookDetailPage({ params }: { params: Promise<{ slug: str
           localStorage.setItem('subscription_active', 'true');
         }
 
-        // ✅ ACTUALIZAR ESTADO para desbloquear capítulos INMEDIATAMENTE
         setHasAccess(true);
-
-
-        // Después de setHasAccess(true) en cualquiera de las funciones:
-        setTimeout(() => {
-          // Animar los capítulos que antes estaban bloqueados
-          const lockedChapters = document.querySelectorAll('[id^="chapter-"]');
-          lockedChapters.forEach((el, idx) => {
-            const wasLocked = el.querySelector('svg[data-lucide="lock"]'); // o tu selector de candado
-            if (wasLocked) {
-              el.classList.add('ring-2', 'ring-green-400/50', 'animate-pulse');
-              setTimeout(() => {
-                el.classList.remove('ring-2', 'ring-green-400/50', 'animate-pulse');
-              }, 2000 + idx * 100);
-            }
-          });
-        }, 500);
-
-
         setShowPaywall(false);
         success('✅ ¡Pago simulado exitoso! Acceso completo desbloqueado.');
-
-        // ❌ ELIMINADA LA REDIRECCIÓN - Ahora se queda en la misma página
 
       } catch (e) {
         showError('❌ Error al procesar el pago simulado');
@@ -182,6 +624,7 @@ export default function BookDetailPage({ params }: { params: Promise<{ slug: str
       }
     }
   };
+
   const resetAccess = () => {
     try {
       localStorage.removeItem(`purchased_${book.slug}`);
@@ -205,29 +648,10 @@ export default function BookDetailPage({ params }: { params: Promise<{ slug: str
         localStorage.setItem('subscription_active', 'true');
       }
 
-      // ✅ ACTUALIZAR ESTADO para desbloquear capítulos INMEDIATAMENTE
       setHasAccess(true);
-
-      // Después de setHasAccess(true) en cualquiera de las funciones:
-      setTimeout(() => {
-        // Animar los capítulos que antes estaban bloqueados
-        const lockedChapters = document.querySelectorAll('[id^="chapter-"]');
-        lockedChapters.forEach((el, idx) => {
-          const wasLocked = el.querySelector('svg[data-lucide="lock"]'); // o tu selector de candado
-          if (wasLocked) {
-            el.classList.add('ring-2', 'ring-green-400/50', 'animate-pulse');
-            setTimeout(() => {
-              el.classList.remove('ring-2', 'ring-green-400/50', 'animate-pulse');
-            }, 2000 + idx * 100);
-          }
-        });
-      }, 500);
-
       setShowPaywall(false);
       success('🎉 ¡Bienvenido! Tu audiolibro está listo para escuchar.');
 
-      // ❌ ELIMINADA LA REDIRECCIÓN - Se queda en /libro/[slug]
-      // Opcional: hacer scroll suave hacia los capítulos desbloqueados
       setTimeout(() => {
         document.getElementById('catalogo')?.scrollIntoView({
           behavior: 'smooth',
@@ -241,8 +665,6 @@ export default function BookDetailPage({ params }: { params: Promise<{ slug: str
     }
   };
 
-  
-
   // ============ FUNCIONES DE REPRODUCCIÓN ============
 
   const handlePlayChapter = (chapter: Chapter) => {
@@ -251,7 +673,6 @@ export default function BookDetailPage({ params }: { params: Promise<{ slug: str
       setIsPlayerExpanded(true);
       setCurrentPlaybackTime(0);
 
-      // Scroll suave hacia el player (solo en desktop)
       if (window.innerWidth >= 768) {
         setTimeout(() => {
           document.getElementById('chapter-player')?.scrollIntoView({
@@ -262,7 +683,6 @@ export default function BookDetailPage({ params }: { params: Promise<{ slug: str
       }
     } else {
       info('🔒 Desbloqueá el libro para escuchar este capítulo.');
-      // Pequeño feedback visual en el capítulo bloqueado
       const chapterEl = document.getElementById(`chapter-${chapter.id}`);
       chapterEl?.classList.add('animate-shake');
       setTimeout(() => chapterEl?.classList.remove('animate-shake'), 500);
@@ -270,7 +690,6 @@ export default function BookDetailPage({ params }: { params: Promise<{ slug: str
   };
 
   const handleChapterEnd = useCallback(() => {
-    // Auto-play siguiente capítulo si tiene acceso
     if (hasAccess && activeChapter) {
       const currentIndex = book.chapters.findIndex(c => c.id === activeChapter.id);
       const nextChapter = book.chapters[currentIndex + 1];
@@ -348,7 +767,7 @@ export default function BookDetailPage({ params }: { params: Promise<{ slug: str
         </div>
       )}
 
-      {/* Panel de Testing (animado) */}
+      {/* Panel de Testing */}
       <AnimatePresence>
         {isDev && showTestPanel && (
           <motion.div
@@ -376,17 +795,14 @@ export default function BookDetailPage({ params }: { params: Promise<{ slug: str
             </div>
 
             <div className="space-y-3 text-xs">
-              {/* Estado actual */}
               <div className="p-3 rounded-lg bg-white/5 border border-white/10">
                 <p className="text-gray-400 mb-1">Estado de acceso:</p>
-                <div className={`flex items-center gap-2 font-medium ${hasAccess ? 'text-green-400' : 'text-red-400'
-                  }`}>
+                <div className={`flex items-center gap-2 font-medium ${hasAccess ? 'text-green-400' : 'text-red-400'}`}>
                   {hasAccess ? <CheckCircle size={14} /> : <Lock size={14} />}
                   {hasAccess ? '✅ Acceso concedido' : '🔒 Sin acceso'}
                 </div>
               </div>
 
-              {/* Acciones de simulación */}
               <div>
                 <p className="text-gray-400 mb-2">Simular pago:</p>
                 <div className="space-y-2">
@@ -399,19 +815,10 @@ export default function BookDetailPage({ params }: { params: Promise<{ slug: str
                     <Zap size={14} />
                     Compra Única ({formatPrice(book.price.oneTime)})
                   </motion.button>
-                  <motion.button
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    onClick={() => simulatePayment('subscription')}
-                    className="w-full px-3 py-2.5 bg-blue-500 hover:bg-blue-600 text-white font-semibold rounded-xl text-xs transition flex items-center justify-center gap-2 shadow-lg"
-                  >
-                    <Zap size={14} />
-                    Suscripción ({formatPrice(book.price.subscription)}/mes)
-                  </motion.button>
+
                 </div>
               </div>
 
-              {/* Debug info */}
               <div className="p-3 rounded-lg bg-white/5 border border-white/10 font-mono text-[10px]">
                 <p className="text-gray-400 mb-1">Debug:</p>
                 <p>Slug: <span className="text-purple-400">{book.slug}</span></p>
@@ -419,7 +826,6 @@ export default function BookDetailPage({ params }: { params: Promise<{ slug: str
                 <p>Tiempo: <span className="text-green-400">{Math.floor(currentPlaybackTime)}s</span></p>
               </div>
 
-              {/* Reset */}
               <motion.button
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
@@ -444,7 +850,6 @@ export default function BookDetailPage({ params }: { params: Promise<{ slug: str
           backgroundBlendMode: 'multiply'
         }}
       >
-        {/* Overlay decorativo */}
         <div className="absolute inset-0 bg-gradient-to-t from-gray-950 via-gray-950/50 to-transparent pointer-events-none" />
 
         <motion.div
@@ -453,21 +858,17 @@ export default function BookDetailPage({ params }: { params: Promise<{ slug: str
           transition={{ duration: 0.6, ease: "easeOut" }}
           className="relative max-w-4xl z-10"
         >
-          {/* Badge de tipo de contenido */}
           <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-amber-500/20 border border-amber-500/30 rounded-full text-amber-400 text-xs font-medium mb-4">
             <Headphones size={14} />
             <span>Audiolibro • {book.totalDuration}</span>
           </div>
 
-          <h1 className="text-4xl md:text-6xl font-bold mb-3 leading-tight">
-            {book.title}
-          </h1>
+          <h1 className="text-4xl md:text-6xl font-bold mb-3 leading-tight">{book.title}</h1>
 
           <p className="text-gray-300 text-lg md:text-xl mb-4 font-light">
             por <span className="text-white font-medium">{book.author}</span>
           </p>
 
-          {/* Stats */}
           <div className="flex flex-wrap items-center gap-4 text-sm text-gray-400">
             <div className="flex items-center gap-1.5">
               <CheckCircle size={14} className="text-green-400" />
@@ -494,9 +895,7 @@ export default function BookDetailPage({ params }: { params: Promise<{ slug: str
           transition={{ delay: 0.2 }}
           className="prose prose-invert prose-lg max-w-none"
         >
-          <p className="text-gray-300 leading-relaxed">
-            {book.description}
-          </p>
+          <p className="text-gray-300 leading-relaxed">{book.description}</p>
         </motion.div>
       </section>
 
@@ -513,9 +912,7 @@ export default function BookDetailPage({ params }: { params: Promise<{ slug: str
               <Play className="text-amber-400" size={20} />
             </div>
             <div>
-              <h3 className="text-lg font-semibold text-white">
-                {previewChapter?.title || 'Vista Previa'}
-              </h3>
+              <h3 className="text-lg font-semibold text-white">{previewChapter?.title || 'Vista Previa'}</h3>
               <p className="text-sm text-gray-400">Escuchá gratis antes de decidir</p>
             </div>
           </div>
@@ -534,7 +931,7 @@ export default function BookDetailPage({ params }: { params: Promise<{ slug: str
             onSpeedChange={setPlaybackSpeed}
           />
 
-          {/* CTA Post-Preview */}
+          {/* CTA Post-Preview con Pagos Reales */}
           {!hasAccess && (
             <motion.div
               initial={{ opacity: 0 }}
@@ -544,12 +941,8 @@ export default function BookDetailPage({ params }: { params: Promise<{ slug: str
             >
               <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
                 <div>
-                  <p className="text-gray-300 font-medium mb-1">
-                    ¿Te gustó lo que escuchaste?
-                  </p>
-                  <p className="text-sm text-gray-400">
-                    Desbloqueá los {book.chapters.length} capítulos completos.
-                  </p>
+                  <p className="text-gray-300 font-medium mb-1">¿Te gustó lo que escuchaste?</p>
+                  <p className="text-sm text-gray-400">Desbloqueá los {book.chapters.length} capítulos completos.</p>
                 </div>
 
                 <div className="flex flex-wrap gap-3">
@@ -558,7 +951,7 @@ export default function BookDetailPage({ params }: { params: Promise<{ slug: str
                       <motion.button
                         whileHover={{ scale: 1.02 }}
                         whileTap={{ scale: 0.98 }}
-                        onClick={() => simulatePayment('oneTime')}
+                        onClick={() => { setSelectedPlan('oneTime'); simulatePayment('oneTime'); }}
                         className="px-5 py-2.5 bg-amber-500 text-black font-bold rounded-xl hover:bg-amber-400 transition flex items-center gap-2 text-sm shadow-lg"
                       >
                         <Zap size={16} />
@@ -567,7 +960,7 @@ export default function BookDetailPage({ params }: { params: Promise<{ slug: str
                       <motion.button
                         whileHover={{ scale: 1.02 }}
                         whileTap={{ scale: 0.98 }}
-                        onClick={() => simulatePayment('subscription')}
+                        onClick={() => { setSelectedPlan('subscription'); simulatePayment('subscription'); }}
                         className="px-5 py-2.5 bg-white/10 text-white font-semibold rounded-xl hover:bg-white/20 transition border border-white/20 text-sm"
                       >
                         Simular Suscripción
@@ -578,19 +971,13 @@ export default function BookDetailPage({ params }: { params: Promise<{ slug: str
                       <motion.button
                         whileHover={{ scale: 1.02 }}
                         whileTap={{ scale: 0.98 }}
-                        onClick={handleUnlock}
-                        className="px-5 py-2.5 bg-amber-500 text-black font-bold rounded-xl hover:bg-amber-400 transition text-sm shadow-lg"
+                        onClick={() => { setSelectedPlan('oneTime'); handleUnlock(); }}
+                        className="px-5 py-2.5 bg-amber-500 text-black font-bold rounded-xl hover:bg-amber-400 transition text-sm shadow-lg flex items-center gap-2"
                       >
-                        Comprar por {formatPrice(book.price.oneTime)}
+                        <CreditCard size={16} />
+                        {formatPrice(book.price.oneTime)} • Pago único
                       </motion.button>
-                      <motion.button
-                        whileHover={{ scale: 1.02 }}
-                        whileTap={{ scale: 0.98 }}
-                        onClick={handleUnlock}
-                        className="px-5 py-2.5 bg-white/10 text-white font-semibold rounded-xl hover:bg-white/20 transition border border-white/20 text-sm"
-                      >
-                        Suscripción {formatPrice(book.price.subscription)}/mes
-                      </motion.button>
+
                     </>
                   )}
                 </div>
@@ -607,7 +994,7 @@ export default function BookDetailPage({ params }: { params: Promise<{ slug: str
         </motion.div>
       </section>
 
-      {/* ===== PLAYER DEL CAPÍTULO ACTIVO (EXPANDIDO) ===== */}
+      {/* ===== PLAYER DEL CAPÍTULO ACTIVO ===== */}
       <AnimatePresence>
         {activeChapter && (
           <motion.section
@@ -618,66 +1005,37 @@ export default function BookDetailPage({ params }: { params: Promise<{ slug: str
             transition={{ type: "spring", damping: 25, stiffness: 300 }}
             className="px-6 md:px-8 py-4 max-w-4xl mx-auto"
           >
-            <motion.div
-              className="bg-gradient-to-br from-amber-500/10 via-white/5 to-white/5 border border-amber-500/20 rounded-2xl overflow-hidden"
-              layout
-            >
+            <motion.div className="bg-gradient-to-br from-amber-500/10 via-white/5 to-white/5 border border-amber-500/20 rounded-2xl overflow-hidden" layout>
               {/* Header del player */}
               <div className="flex items-center justify-between p-4 md:p-5 border-b border-white/10">
                 <div className="flex items-center gap-3 min-w-0">
-                  <motion.div
-                    animate={{ rotate: isPlayerExpanded ? 360 : 0 }}
-                    transition={{ duration: 0.5 }}
-                    className="p-2 rounded-lg bg-amber-500/20 flex-shrink-0"
-                  >
+                  <motion.div animate={{ rotate: isPlayerExpanded ? 360 : 0 }} transition={{ duration: 0.5 }} className="p-2 rounded-lg bg-amber-500/20 flex-shrink-0">
                     <Headphones className="text-amber-400" size={20} />
                   </motion.div>
                   <div className="min-w-0">
-                    <h3 className="text-base md:text-lg font-semibold text-white truncate">
-                      {activeChapter.title}
-                    </h3>
+                    <h3 className="text-base md:text-lg font-semibold text-white truncate">{activeChapter.title}</h3>
                     <p className="text-sm text-gray-400 truncate">{book.title}</p>
                   </div>
                 </div>
-
                 <div className="flex items-center gap-2">
-                  {/* Badge de preview si aplica */}
                   {activeChapter.isPreview && (
-                    <span className="hidden sm:inline-flex items-center px-2 py-0.5 bg-amber-500/20 text-amber-400 text-[10px] font-medium rounded-full">
-                      PREVIEW
-                    </span>
+                    <span className="hidden sm:inline-flex items-center px-2 py-0.5 bg-amber-500/20 text-amber-400 text-[10px] font-medium rounded-full">PREVIEW</span>
                   )}
-
-                  {/* Botón colapsar */}
                   <motion.button
                     whileHover={{ scale: 1.05 }}
                     whileTap={{ scale: 0.95 }}
-                    onClick={() => {
-                      setIsPlayerExpanded(!isPlayerExpanded);
-                      if (isPlayerExpanded) {
-                        // Opcional: pausar al colapsar
-                        // setActiveChapter(null);
-                      }
-                    }}
+                    onClick={() => setIsPlayerExpanded(!isPlayerExpanded)}
                     className="p-2 rounded-full hover:bg-white/10 transition text-gray-400 hover:text-white"
-                    title={isPlayerExpanded ? "Colapsar player" : "Expandir player"}
-                    aria-label={isPlayerExpanded ? "Colapsar reproductor" : "Expandir reproductor"}
                   >
                     {isPlayerExpanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
                   </motion.button>
                 </div>
               </div>
 
-              {/* Contenido del player */}
+              {/* Contenido */}
               <AnimatePresence mode="wait">
                 {isPlayerExpanded ? (
-                  <motion.div
-                    key="expanded"
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    className="p-4 md:p-6"
-                  >
+                  <motion.div key="expanded" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="p-4 md:p-6">
                     <AudioPlayer
                       title={activeChapter.title}
                       chapter={`Capítulo ${book.chapters.findIndex(c => c.id === activeChapter.id) + 1}`}
@@ -689,101 +1047,44 @@ export default function BookDetailPage({ params }: { params: Promise<{ slug: str
                       onTimeUpdate={handleTimeUpdate}
                       onSpeedChange={setPlaybackSpeed}
                     />
-
-                    {/* Controles de navegación entre capítulos */}
                     <div className="flex items-center justify-between mt-4 pt-4 border-t border-white/10">
-                      <motion.button
-                        whileHover={{ scale: 1.05 }}
-                        whileTap={{ scale: 0.95 }}
-                        onClick={handlePreviousChapter}
-                        disabled={book.chapters.indexOf(activeChapter) === 0}
-                        className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition text-sm"
-                      >
-                        <SkipBack size={16} />
-                        <span className="hidden sm:inline">Anterior</span>
+                      <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={handlePreviousChapter} disabled={book.chapters.indexOf(activeChapter) === 0} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition text-sm">
+                        <SkipBack size={16} /><span className="hidden sm:inline">Anterior</span>
                       </motion.button>
-
-                      <span className="text-xs text-gray-500">
-                        {book.chapters.indexOf(activeChapter) + 1} / {book.chapters.length}
-                      </span>
-
-                      <motion.button
-                        whileHover={{ scale: 1.05 }}
-                        whileTap={{ scale: 0.95 }}
-                        onClick={handleNextChapter}
-                        disabled={book.chapters.indexOf(activeChapter) === book.chapters.length - 1}
-                        className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition text-sm"
-                      >
-                        <span className="hidden sm:inline">Siguiente</span>
-                        <SkipForward size={16} />
+                      <span className="text-xs text-gray-500">{book.chapters.indexOf(activeChapter) + 1} / {book.chapters.length}</span>
+                      <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={handleNextChapter} disabled={book.chapters.indexOf(activeChapter) === book.chapters.length - 1} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition text-sm">
+                        <span className="hidden sm:inline">Siguiente</span><SkipForward size={16} />
                       </motion.button>
                     </div>
                   </motion.div>
                 ) : (
-                  <motion.div
-                    key="compact"
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    className="p-3 md:p-4"
-                  >
-                    {/* Mini player con controles básicos */}
+                  <motion.div key="compact" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="p-3 md:p-4">
                     <div className="flex items-center gap-3">
-                      <motion.button
-                        whileHover={{ scale: 1.1 }}
-                        whileTap={{ scale: 0.9 }}
-                        onClick={() => {
-                          // Toggle play/pause (lógica simplificada)
-                          const audio = document.querySelector(`audio[src="${activeChapter.src}"]`) as HTMLAudioElement;
-                          if (audio) {
-                            audio.paused ? audio.play() : audio.pause();
-                          }
-                        }}
-                        className="p-3 rounded-full bg-amber-500 hover:bg-amber-600 text-black transition shadow-lg flex-shrink-0"
-                        aria-label="Reproducir/Pausar"
-                      >
+                      <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }} onClick={() => {
+                        const audio = document.querySelector(`audio[src="${activeChapter.src}"]`) as HTMLAudioElement;
+                        if (audio) audio.paused ? audio.play() : audio.pause();
+                      }} className="p-3 rounded-full bg-amber-500 hover:bg-amber-600 text-black transition shadow-lg flex-shrink-0">
                         <Play size={18} />
                       </motion.button>
-
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium text-white truncate">{activeChapter.title}</p>
                         <div className="flex items-center gap-2 text-xs text-gray-400">
                           <span>{activeChapter.duration}</span>
-                          {activeChapter.isPreview && (
-                            <span className="px-1.5 py-0.5 bg-amber-500/20 text-amber-400 rounded text-[10px]">
-                              preview
-                            </span>
-                          )}
+                          {activeChapter.isPreview && <span className="px-1.5 py-0.5 bg-amber-500/20 text-amber-400 rounded text-[10px]">preview</span>}
                         </div>
                       </div>
-
-                      {/* Botones de skip compactos */}
                       {!activeChapter.isPreview && (
                         <div className="flex items-center gap-1">
-                          <motion.button
-                            whileTap={{ scale: 0.9 }}
-                            onClick={() => {
-                              const audio = document.querySelector(`audio[src="${activeChapter.src}"]`) as HTMLAudioElement;
-                              if (audio) {
-                                audio.currentTime = Math.max(0, audio.currentTime - 15);
-                              }
-                            }}
-                            className="p-2 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition"
-                            title="Retroceder 15s"
-                          >
+                          <motion.button whileTap={{ scale: 0.9 }} onClick={() => {
+                            const audio = document.querySelector(`audio[src="${activeChapter.src}"]`) as HTMLAudioElement;
+                            if (audio) audio.currentTime = Math.max(0, audio.currentTime - 15);
+                          }} className="p-2 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition">
                             <SkipBack size={16} />
                           </motion.button>
-                          <motion.button
-                            whileTap={{ scale: 0.9 }}
-                            onClick={() => {
-                              const audio = document.querySelector(`audio[src="${activeChapter.src}"]`) as HTMLAudioElement;
-                              if (audio) {
-                                audio.currentTime = Math.min(audio.duration || 9999, audio.currentTime + 15);
-                              }
-                            }}
-                            className="p-2 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition"
-                            title="Adelantar 15s"
-                          >
+                          <motion.button whileTap={{ scale: 0.9 }} onClick={() => {
+                            const audio = document.querySelector(`audio[src="${activeChapter.src}"]`) as HTMLAudioElement;
+                            if (audio) audio.currentTime = Math.min(audio.duration || 9999, audio.currentTime + 15);
+                          }} className="p-2 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition">
                             <SkipForward size={16} />
                           </motion.button>
                         </div>
@@ -799,19 +1100,10 @@ export default function BookDetailPage({ params }: { params: Promise<{ slug: str
 
       {/* ===== LISTA DE CAPÍTULOS ===== */}
       <section className="px-6 md:px-8 py-8 max-w-4xl mx-auto">
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.4 }}
-        >
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }}>
           <div className="flex items-center justify-between mb-6">
-            <h2 className="text-2xl font-bold flex items-center gap-2">
-              <List size={24} className="text-amber-400" />
-              Contenido
-            </h2>
-            <span className="text-sm text-gray-400">
-              {book.chapters.filter(c => c.isPreview).length} gratis • {book.chapters.filter(c => !c.isPreview).length} premium
-            </span>
+            <h2 className="text-2xl font-bold flex items-center gap-2"><List size={24} className="text-amber-400" /> Contenido</h2>
+            <span className="text-sm text-gray-400">{book.chapters.filter(c => c.isPreview).length} gratis • {book.chapters.filter(c => !c.isPreview).length} premium</span>
           </div>
 
           <div className="space-y-2">
@@ -837,26 +1129,15 @@ export default function BookDetailPage({ params }: { params: Promise<{ slug: str
                   role="button"
                   tabIndex={isPlayable ? 0 : -1}
                   aria-disabled={!isPlayable}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      if (isPlayable) handlePlayChapter(chapter);
-                    }
-                  }}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (isPlayable) handlePlayChapter(chapter); } }}
                 >
                   <div className="flex items-center gap-4 min-w-0">
-                    {/* Número/Icono de estado */}
                     <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 transition-colors ${isActive
                       ? 'bg-amber-500/20 text-amber-400'
-                      : isPlayable
-                        ? 'bg-white/10 text-gray-300 group-hover:bg-amber-500/20 group-hover:text-amber-400'
-                        : 'bg-white/5 text-gray-600'
+                      : isPlayable ? 'bg-white/10 text-gray-300 group-hover:bg-amber-500/20 group-hover:text-amber-400' : 'bg-white/5 text-gray-600'
                       }`}>
                       {isActive ? (
-                        <motion.div
-                          animate={{ scale: [1, 1.15, 1] }}
-                          transition={{ repeat: Infinity, duration: 1.5, ease: "easeInOut" }}
-                        >
+                        <motion.div animate={{ scale: [1, 1.15, 1] }} transition={{ repeat: Infinity, duration: 1.5, ease: "easeInOut" }}>
                           <Headphones size={18} />
                         </motion.div>
                       ) : isPlayable ? (
@@ -865,51 +1146,30 @@ export default function BookDetailPage({ params }: { params: Promise<{ slug: str
                         <Lock size={16} />
                       )}
                     </div>
-
-                    {/* Info del capítulo */}
                     <div className="min-w-0 flex-1">
-                      <p className={`font-medium transition-colors truncate ${isPlayable ? 'text-white group-hover:text-amber-400' : 'text-gray-500'
-                        }`}>
-                        {chapter.title}
-                      </p>
+                      <p className={`font-medium transition-colors truncate ${isPlayable ? 'text-white group-hover:text-amber-400' : 'text-gray-500'}`}>{chapter.title}</p>
                       <div className="flex items-center gap-3 text-sm text-gray-500 mt-0.5">
                         <span>{chapter.duration}</span>
-                        {chapter.description && (
-                          <span className="hidden md:inline text-gray-600">• {chapter.description}</span>
-                        )}
+                        {chapter.description && <span className="hidden md:inline text-gray-600">• {chapter.description}</span>}
                       </div>
                     </div>
                   </div>
-
-                  {/* Badges y acciones */}
                   <div className="flex items-center gap-3 flex-shrink-0">
-                    {chapter.isPreview && (
-                      <span className="text-[10px] px-2 py-1 bg-amber-500/20 text-amber-400 rounded-full font-medium">
-                        GRATIS
-                      </span>
-                    )}
+                    {chapter.isPreview && <span className="text-[10px] px-2 py-1 bg-amber-500/20 text-amber-400 rounded-full font-medium">GRATIS</span>}
                     {hasAccess && !chapter.isPreview && (
-                      <motion.div
-                        initial={{ scale: 0 }}
-                        animate={{ scale: 1 }}
-                        transition={{ delay: 0.5 + (idx * 0.03) }}
-                      >
+                      <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ delay: 0.5 + (idx * 0.03) }}>
                         <CheckCircle size={18} className="text-green-400" />
                       </motion.div>
                     )}
-                    {isPlayable && !isActive && (
-                      <ChevronDown size={18} className="text-gray-500 group-hover:text-amber-400 transition-colors" />
-                    )}
-                    {!isPlayable && (
-                      <span className="text-[10px] text-gray-600">🔒</span>
-                    )}
+                    {isPlayable && !isActive && <ChevronDown size={18} className="text-gray-500 group-hover:text-amber-400 transition-colors" />}
+                    {!isPlayable && <span className="text-[10px] text-gray-600">🔒</span>}
                   </div>
                 </motion.div>
               );
             })}
           </div>
 
-          {/* CTA final si no tiene acceso */}
+          {/* CTA final con Paywall Modal */}
           {!hasAccess && book.chapters.some(c => !c.isPreview) && (
             <motion.div
               initial={{ opacity: 0, y: 20 }}
@@ -917,51 +1177,118 @@ export default function BookDetailPage({ params }: { params: Promise<{ slug: str
               transition={{ delay: 0.8 }}
               className="mt-8 p-6 bg-gradient-to-br from-amber-500/10 via-purple-500/5 to-transparent rounded-2xl border border-amber-500/20 text-center"
             >
-              <h3 className="text-xl font-bold text-white mb-2">
-                ¿Listo para la magia completa?
-              </h3>
-              <p className="text-gray-400 mb-5 max-w-md mx-auto">
-                Desbloqueá los {book.chapters.filter(c => !c.isPreview).length} capítulos premium y transformá tu vida en 28 días.
-              </p>
+              <h3 className="text-xl font-bold text-white mb-2">¿Listo para la magia completa?</h3>
+              <p className="text-gray-400 mb-5 max-w-md mx-auto">Desbloqueá los {book.chapters.filter(c => !c.isPreview).length} capítulos premium y transformá tu vida en 28 días.</p>
+
               <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
                 <motion.button
                   whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.98 }}
-                  onClick={handleUnlock}
-                  className="px-6 py-3 bg-amber-500 hover:bg-amber-600 text-black font-bold rounded-xl transition shadow-lg shadow-amber-500/25"
+                  onClick={() => { setSelectedPlan('oneTime'); handleUnlock(); }}
+                  className="px-6 py-3 bg-amber-500 hover:bg-amber-600 text-black font-bold rounded-xl transition shadow-lg shadow-amber-500/25 flex items-center gap-2"
                 >
-                  Obtener Acceso Completo • {formatPrice(book.price.oneTime)}
+                  <CreditCard size={18} />
+                  Obtener Acceso • {formatPrice(book.price.oneTime)}
                 </motion.button>
-                <button
-                  onClick={handleUnlock}
-                  className="px-6 py-3 bg-white/10 hover:bg-white/20 text-white font-semibold rounded-xl transition border border-white/20"
-                >
-                  Suscripción • {formatPrice(book.price.subscription)}/mes
-                </button>
+
               </div>
             </motion.div>
           )}
         </motion.div>
       </section>
 
-      {/* ===== FOOTER DECORATIVO ===== */}
+      {/* ===== MODAL DE PAGO (PAYWALL) ===== */}
+      <AnimatePresence>
+        {showPaywall && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+            onClick={(e) => e.target === e.currentTarget && setShowPaywall(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-gray-900 border border-white/10 rounded-2xl p-6 max-w-md w-full shadow-2xl max-h-[90vh] overflow-y-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h3 className="text-xl font-bold text-white">
+                    {selectedPlan === 'oneTime' ? 'Compra Única' : 'Suscripción Mensual'}
+                  </h3>
+                  <p className="text-gray-400 text-sm">{book.title}</p>
+                </div>
+                <motion.button
+                  whileHover={{ scale: 1.1 }}
+                  whileTap={{ scale: 0.9 }}
+                  onClick={() => setShowPaywall(false)}
+                  className="p-2 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition"
+                >
+                  <X size={20} />
+                </motion.button>
+              </div>
+
+              {/* Resumen */}
+              <div className="p-4 bg-white/5 rounded-xl mb-6">
+                <div className="flex justify-between text-sm mb-2">
+                  <span className="text-gray-400">Producto:</span>
+                  <span className="text-white">{book.title}</span>
+                </div>
+                <div className="flex justify-between text-sm mb-2">
+                  <span className="text-gray-400">Plan:</span>
+                  <span className="text-white">{selectedPlan === 'oneTime' ? 'Acceso de por vida' : 'Acceso mensual'}</span>
+                </div>
+                <div className="flex justify-between text-lg font-bold pt-3 border-t border-white/10">
+                  <span className="text-gray-300">Total:</span>
+                  <span className="text-amber-400">
+                    {formatPrice(book.price.oneTime)}
+                  </span>
+                </div>
+              </div>
+
+              {/* Gateway de pago real */}
+              <InlinePaymentGateway
+                amount={book.price.oneTime}
+                currency="ARS"
+                description={`Audiolibro: ${book.title} - ${selectedPlan === 'oneTime' ? 'Compra única' : 'Suscripción mensual'}`}
+                onPaymentSuccess={onPaymentSuccess}
+                onPaymentError={(err) => {
+                  console.error('Payment error:', err);
+                  setShowPaywall(false);
+                }}
+                mode={selectedPlan}
+                bookSlug={book.slug}
+              />
+
+              {/* Términos */}
+              <p className="text-[10px] text-gray-500 text-center mt-4">
+                Al continuar, aceptás nuestros{' '}
+                <a href="/terminos" className="text-amber-400 hover:underline">Términos</a> y{' '}
+                <a href="/privacidad" className="text-amber-400 hover:underline">Política de Privacidad</a>.
+              </p>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ===== FOOTER ===== */}
       <footer className="px-6 md:px-8 py-12 text-center text-gray-600 text-sm">
         <p>© {new Date().getFullYear()} Tu Marca AR • Audiolibros Premium</p>
-        <p className="mt-1 text-xs opacity-70">
-          La magia está en vos ✨
-        </p>
+        <p className="mt-1 text-xs opacity-70">La magia está en vos ✨</p>
       </footer>
 
-      {/* ===== ESTILOS GLOBALES PARA ANIMACIONES ===== */}
+      {/* ===== ESTILOS GLOBALES ===== */}
       <style jsx global>{`
         @keyframes shake {
           0%, 100% { transform: translateX(0); }
           25% { transform: translateX(-4px); }
           75% { transform: translateX(4px); }
         }
-        .animate-shake {
-          animation: shake 0.3s ease-in-out;
-        }
+        .animate-shake { animation: shake 0.3s ease-in-out; }
       `}</style>
     </main>
   );

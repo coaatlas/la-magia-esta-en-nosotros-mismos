@@ -118,9 +118,18 @@ function BookCardSkeleton() {
 // ============================================================================
 
 function ParticlesStars({ count = 20, darkMode }: { count?: number; darkMode: boolean }) {
-  // Generar posiciones UNA VEZ al montar (solo en cliente)
-  const particles = useMemo(() => {
-    return Array.from({ length: count }, (_, i) => ({
+  const [particles, setParticles] = useState<Array<{
+    id: number;
+    top: number;
+    left: number;
+    duration: number;
+    delay: number;
+    size: number;
+  }>>([]);
+  
+  // Generar partículas SOLO en cliente después del mount
+  useEffect(() => {
+    const generated = Array.from({ length: count }, (_, i) => ({
       id: i,
       top: Math.random() * 100,
       left: Math.random() * 100,
@@ -128,7 +137,11 @@ function ParticlesStars({ count = 20, darkMode }: { count?: number; darkMode: bo
       delay: Math.random() * 2,
       size: Math.random() > 0.7 ? 2 : 1,
     }));
+    setParticles(generated);
   }, [count]);
+
+  // Renderizado inicial vacío = compatible con SSR
+  if (particles.length === 0) return null;
 
   return (
     <>
@@ -158,7 +171,6 @@ function ParticlesStars({ count = 20, darkMode }: { count?: number; darkMode: bo
     </>
   );
 }
-
 // ============================================================================
 // COMPONENTE PRINCIPAL
 // ============================================================================
@@ -424,37 +436,7 @@ export default function HomePage() {
               </footer>
             </motion.blockquote>
 
-            {/* Stats con iconos espirituales */}
-            <motion.div 
-              className="flex flex-wrap justify-center gap-6 md:gap-8 mb-12"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: 0.8 }}
-            >
-              {[
-                { icon: Heart, label: 'Libros de manifestación', value: books.filter(b => b.tags?.some(t => ['Gratitud', 'Manifestación', 'Abundancia'].includes(t))).length || books.length, color: 'text-pink-400' },
-                { icon: Sparkles, label: 'Horas de energía positiva', value: '50+', color: 'text-amber-400' },
-                { icon: Star, label: 'Transformaciones reales', value: '10K+', color: 'text-purple-400' },
-              ].map((stat, idx) => (
-                <motion.div
-                  key={stat.label}
-                  initial={{ opacity: 0, scale: 0.8 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  transition={{ delay: 0.9 + idx * 0.15, type: "spring", stiffness: 200 }}
-                  className="flex flex-col items-center gap-2 min-w-[140px]"
-                >
-                  <div className={`p-3 rounded-2xl bg-gradient-to-br from-white/10 to-white/5 border border-white/20 ${stat.color}`}>
-                    <stat.icon size={22} />
-                  </div>
-                  <span className={`text-2xl font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-                    {stat.value}
-                  </span>
-                  <span className={`text-xs md:text-sm text-center ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                    {stat.label}
-                  </span>
-                </motion.div>
-              ))}
-            </motion.div>
+       
 
             {/* CTA Principal con vibra mágica */}
             <motion.div
@@ -463,32 +445,7 @@ export default function HomePage() {
               transition={{ delay: 1.1 }}
               className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-12"
             >
-              <motion.button
-                whileHover={{ scale: 1.03, boxShadow: "0 0 30px rgba(245, 158, 11, 0.4)" }}
-                whileTap={{ scale: 0.98 }}
-                onClick={() => {
-                  const primerLibro = books.find(b => b.isPopular || b.isNew) || books[0];
-                  if (primerLibro) {
-                    window.location.href = `/libro/${primerLibro.slug}`;
-                  }
-                }}
-                className="group relative px-8 py-4 bg-gradient-to-r from-amber-500 via-purple-500 to-pink-500 hover:from-amber-600 hover:via-purple-600 hover:to-pink-600 text-white font-semibold rounded-2xl transition-all shadow-xl shadow-amber-500/25 overflow-hidden"
-              >
-                <motion.span
-                  className="absolute inset-0 bg-white/20 opacity-0 group-hover:opacity-100 transition-opacity"
-                  style={{
-                    background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent)",
-                    transform: "translateX(-100%)",
-                  }}
-                  whileHover={{ x: "200%" }}
-                  transition={{ duration: 0.6 }}
-                />
-                <span className="relative flex items-center gap-2">
-                  <Sparkles size={18} className="animate-pulse" />
-                  Empezar mi transformación
-                  <ChevronRight size={18} className="group-hover:translate-x-1 transition-transform" />
-                </span>
-              </motion.button>
+             
 
               <motion.button
                 whileHover={{ scale: 1.02 }}
@@ -532,87 +489,7 @@ export default function HomePage() {
             </motion.div>
           </motion.div>
 
-          {/* ===== BARRA DE BÚSQUEDA CON VIBRA MÁGICA ===== */}
-          <motion.div
-            initial={{ opacity: 0, y: 30 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 1.4, duration: 0.6 }}
-            className="max-w-2xl mx-auto"
-          >
-            <div className={`relative flex items-center rounded-2xl border transition-all duration-300 ${
-              darkMode 
-                ? 'bg-gray-900/80 border-gray-700 focus-within:border-amber-500 focus-within:shadow-lg focus-within:shadow-amber-500/20' 
-                : 'bg-white/90 border-gray-200 focus-within:border-amber-400 focus-within:shadow-lg focus-within:shadow-amber-200'
-            } backdrop-blur-sm`}>
-              
-              <div className="pl-5">
-                <motion.div
-                  animate={{ rotate: [0, 10, -10, 0] }}
-                  transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
-                >
-                  <Search size={20} className={darkMode ? 'text-amber-400/80' : 'text-amber-500'} />
-                </motion.div>
-              </div>
-              
-              <input
-                type="text"
-                placeholder="¿Qué querés manifestar hoy? (gratitud, abundancia, amor...)"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className={`flex-1 px-4 py-4 bg-transparent outline-none text-sm md:text-base ${
-                  darkMode ? 'placeholder-gray-500 text-white' : 'placeholder-gray-400 text-gray-900'
-                }`}
-                aria-label="Buscar audiolibros de manifestación"
-              />
-              
-              {searchQuery && (
-                <motion.button
-                  initial={{ scale: 0 }}
-                  animate={{ scale: 1 }}
-                  exit={{ scale: 0 }}
-                  onClick={() => setSearchQuery('')}
-                  className={`mr-3 p-2 rounded-full transition-colors ${
-                    darkMode ? 'hover:bg-gray-800 text-gray-400' : 'hover:bg-gray-100 text-gray-500'
-                  }`}
-                  aria-label="Limpiar búsqueda"
-                >
-                  <X size={16} />
-                </motion.button>
-              )}
-              
-              <motion.button
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                className="m-1.5 px-5 py-2.5 bg-gradient-to-r from-amber-500 to-purple-600 hover:from-amber-600 hover:to-purple-700 text-white text-sm font-medium rounded-xl transition-shadow shadow-lg shadow-amber-500/25"
-              >
-                Buscar
-              </motion.button>
-            </div>
-            
-            {/* Sugestiones de búsqueda */}
-            <motion.div 
-              className="flex flex-wrap justify-center gap-2 mt-4"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: 1.6 }}
-            >
-              {['Gratitud', 'Abundancia', 'Amor propio', 'Manifestación'].map((suggestion) => (
-                <motion.button
-                  key={suggestion}
-                  whileHover={{ scale: 1.05, y: -2 }}
-                  whileTap={{ scale: 0.95 }}
-                  onClick={() => setSearchQuery(suggestion)}
-                  className={`px-3 py-1.5 text-xs rounded-full transition-all ${
-                    darkMode 
-                      ? 'bg-white/5 hover:bg-white/10 text-gray-400 hover:text-amber-400 border border-white/10' 
-                      : 'bg-gray-100 hover:bg-amber-100 text-gray-600 hover:text-amber-700 border border-gray-200'
-                  }`}
-                >
-                  {suggestion}
-                </motion.button>
-              ))}
-            </motion.div>
-          </motion.div>
+        
 
           {/* ===== INDICADOR DE SCROLL SUAVE ===== */}
           <motion.div
@@ -865,9 +742,7 @@ export default function HomePage() {
         darkMode ? 'text-gray-600' : 'text-gray-400'
       }`}>
         <p>© {new Date().getFullYear()} La Magia de Crear • Audiolibros</p>
-        <p className="mt-1 text-xs opacity-70">
-          Hecho con ✨ en Buenos Aires, Argentina
-        </p>
+    
       </footer>
 
       {/* ===== UTILITIES ===== */}
