@@ -50,7 +50,7 @@ const books: Book[] = [
   },
   {
     slug: 'el-secreto',
-    title: 'El Secreto',
+    title: 'El Secreto(Proximamente)',
     author: 'Rhonda Byrne',
     cover: '/covers/secreto.webp',
     description: 'El Secreto revela los principios universales que han sido conocidos por algunos, practicados por grandes maestros y ocultados al público durante siglos. Este audiolibro te guiará paso a paso para comprender y aplicar esta poderosa ley que puede transformar tu vida.',

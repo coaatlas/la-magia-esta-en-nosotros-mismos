@@ -516,6 +516,7 @@ export default function BookDetailPage({ params }: { params: Promise<{ slug: str
       { id: 'cap24', title: 'Día 21 - Magníficos Resultados', duration: '5:15', durationSeconds: 260, src: '/audios/25_dia-21.mp3', isPreview: false },
       { id: 'cap25', title: 'Día 22 - Ante tus propios ojos', duration: '5:15', durationSeconds: 260, src: '/audios/26_dia-22.mp3', isPreview: false },
       { id: 'cap26', title: 'Día 23 - El aire mágico que respiras', duration: '4:26', durationSeconds: 260, src: '/audios/27_dia-23.mp3', isPreview: false },
+      { id: 'cap27', title: 'Día 24 - La Varita Mágica', duration: '4:45', durationSeconds: 260, src: '/audios/28_dia-24.mp3', isPreview: false },
       
       
 
