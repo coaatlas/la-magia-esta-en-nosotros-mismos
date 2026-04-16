@@ -1,7 +1,12 @@
-import type { NextConfig } from "next";
+// next.config.js
+const withPWA = require('@ducanh2912/next-pwa').default({
+  dest: 'public',
+  register: true,
+  skipWaiting: true,
+  disable: process.env.NODE_ENV === 'development',
+});
 
-const nextConfig: NextConfig = {
-  /* config options here */
-};
-
-export default nextConfig;
+module.exports = withPWA({
+  // tu configuración actual de Next.js
+  reactStrictMode: true,
+});

@@ -1,0 +1,35 @@
+{
+  "name": "La Magia ✨",
+  "short_name": "La Magia",
+  "description": "Audiolibros de manifestación, gratitud y abundancia",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#030712",
+  "theme_color": "#F59E0B",
+  "orientation": "portrait",
+  "scope": "/",
+  "lang": "es-AR",
+  "categories": ["books", "education", "lifestyle"],
+  "icons": [
+    {
+      "src": "/icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/screenshot-mobile.png",
+      "sizes": "1080x1920",
+      "type": "image/png",
+      "form_factor": "narrow"
+    }
+  ]
+}
