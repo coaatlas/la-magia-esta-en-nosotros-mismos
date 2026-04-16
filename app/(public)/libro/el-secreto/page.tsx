@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { Play, Lock, CheckCircle } from 'lucide-react';
+import Link from 'next/link';
 
 type Chapter = {
   id: string;
@@ -71,6 +72,9 @@ export default function ElSecretoPage() {
             Simular desbloqueo
           </button>
         )}
+
+    
+        <Link href="/">Volver</Link>
       </section>
 
       {/* PLAYER */}
