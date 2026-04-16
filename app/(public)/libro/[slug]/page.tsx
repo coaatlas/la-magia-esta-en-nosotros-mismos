@@ -15,6 +15,7 @@ import { PayPalScriptProvider, PayPalButtons } from '@paypal/react-paypal-js';
 
 // MercadoPago SDK
 import { initMercadoPago, Wallet } from '@mercadopago/sdk-react';
+import Link from 'next/link';
 
 // ============ TIPOS ============
 
@@ -883,6 +884,19 @@ export default function BookDetailPage({ params }: { params: Promise<{ slug: str
                 🎧 Preview gratis
               </span>
             )}
+
+            {/* Botón de volver */}
+
+            <Link
+              href="/"
+              className="px-3 py-1.5 bg-amber-500/20 text-amber-400 rounded-full text-xs"
+            >
+              Volver
+            </Link>
+
+
+
+
           </div>
         </motion.div>
       </section>
