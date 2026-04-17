@@ -239,7 +239,7 @@ export default function BookDetailPage() {
     price: { oneTime: 1000 },
     totalDuration: "3h 45min",
     chapters: [
-      { id: 'intro', title: 'Introducción', duration: '4:12', durationSeconds: 252, src: '/audios/elsecreto/c.mp3', isPreview: true, description: 'Bienvenido al viaje del descubrimiento' },
+      { id: 'intro', title: 'Introducción', duration: '3:05', durationSeconds: 252, src: '/audios/elsecreto/1-elsecreto-revelado.mp3', isPreview: true, description: 'Bienvenido al viaje del descubrimiento' },
       { id: 'cap1', title: 'próximamente... El Secreto Revelado', duration: '8:30', durationSeconds: 510, src: '/audios/elsecreto/c.mp3', isPreview: false },
       { id: 'cap2', title: 'próximamente... El Secreto Simplificado', duration: '6:45', durationSeconds: 405, src: '/audios/elsecreto/c.mp3', isPreview: false },
       { id: 'cap3', title: 'próximamente... Cómo Usar El Secreto', duration: '9:15', durationSeconds: 555, src: '/audios/elsecreto/c.mp3', isPreview: false },
