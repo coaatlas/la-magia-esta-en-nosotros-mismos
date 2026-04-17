@@ -94,7 +94,7 @@ function InlinePaymentGateway({
 
   const createMercadoPagoPreference = useCallback(async () => {
     try {
-      const PRICE_USD = 10.00;
+      const PRICE_USD = 7.00;
       const response = await fetch('/api/mercadopago/create-preference', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
