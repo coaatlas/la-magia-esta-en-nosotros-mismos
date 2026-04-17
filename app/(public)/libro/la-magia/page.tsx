@@ -519,6 +519,8 @@ export default function BookDetailPage({ params }: { params: Promise<{ slug: str
       { id: 'cap27', title: 'Día 24 - La Varita Mágica', duration: '4:45', durationSeconds: 285, src: '/audios/28_dia-24.mp3', isPreview: false },
       { id: 'cap28', title: 'Día 25 - Sigue las indicaciones de la magia', duration: '5:03', durationSeconds: 303, src: '/audios/29_dia-25.mp3', isPreview: false },
       { id: 'cap29', title: 'Día 26 - Transforma mágicamente los errores en bendiciones', duration: '4:30', durationSeconds: 270, src: '/audios/31-1_dia-26.mp3', isPreview: false },
+      { id: 'cap30', title: 'Día 27 - El espejo mágico', duration: '4:30', durationSeconds: 270, src: '/audios/32_dia-27.mp3', isPreview: false },
+      
       
       
       
