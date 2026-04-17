@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Analytics } from "@vercel/analytics/react";
 import "./globals.css";
 import PwaInstallBanner from '@/app/components/PwaInstallBanner';
+import Script from "next/script";
 
 // 🔥 METADATA ESTÁTICA (SEO + PWA)
 export const metadata: Metadata = {
@@ -41,10 +42,25 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html
-      lang="es" // 👈 Cambiado a "es" para tu audiencia
-      className="h-full antialiased"
-    >
+    <html lang="es" className="h-full antialiased">
+      <head>
+        {/* 🔥 GOOGLE ANALYTICS */}
+        <Script
+          src="https://www.googletagmanager.com/gtag/js?id=G-BN6R2GDMJL"
+          strategy="afterInteractive"
+        />
+
+        <Script id="google-analytics" strategy="afterInteractive">
+          {`
+            window.dataLayer = window.dataLayer || [];
+            function gtag(){dataLayer.push(arguments);}
+            gtag('js', new Date());
+
+            gtag('config', 'G-BN6R2GDMJL');
+          `}
+        </Script>
+      </head>
+
       <body className="min-h-full flex flex-col">
         {children}
         <PwaInstallBanner />
