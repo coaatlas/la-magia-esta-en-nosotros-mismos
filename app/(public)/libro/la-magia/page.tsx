@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, use, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Play, Lock, CheckCircle, Headphones, Zap, X,
@@ -18,7 +18,6 @@ import { initMercadoPago, Wallet } from '@mercadopago/sdk-react';
 import Link from 'next/link';
 
 // ============ TIPOS ============
-
 type Chapter = {
   id: string;
   title: string;
@@ -35,9 +34,7 @@ type Book = {
   author: string;
   cover: string;
   description: string;
-  price: {
-    oneTime: number;
-  };
+  price: { oneTime: number };
   chapters: Chapter[];
   totalDuration?: string;
 };
@@ -45,93 +42,48 @@ type Book = {
 type PaymentMethodType = 'mercadopago' | 'paypal' | 'loading';
 
 // ============ UTILIDADES: DETECCIÓN DE PAÍS ============
-
 const MERCADOPAGO_COUNTRIES = ['AR', 'BR', 'CL', 'CO', 'MX', 'PE', 'UY', 'EC'];
 
 async function detectUserCountry(): Promise<{ country: string; useMercadoPago: boolean }> {
   try {
-    const response = await fetch('https://ipapi.co/json/', {
-      headers: { 'Accept': 'application/json' },
-      cache: 'no-store'
-    });
-
+    const response = await fetch('https://ipapi.co/json/', { headers: { 'Accept': 'application/json' }, cache: 'no-store' });
     if (response.ok) {
       const data = await response.json();
       const countryCode = data.country_code?.toUpperCase();
-      return {
-        country: countryCode || 'US',
-        useMercadoPago: MERCADOPAGO_COUNTRIES.includes(countryCode)
-      };
+      return { country: countryCode || 'US', useMercadoPago: MERCADOPAGO_COUNTRIES.includes(countryCode) };
     }
-  } catch (e) {
-    console.warn('⚠️ Geolocalización falló:', e);
-  }
-
-  // Fallback con locale del navegador
+  } catch (e) { console.warn('⚠️ Geolocalización falló:', e); }
   try {
     const locale = navigator.language || (navigator as any).userLanguage;
     const countryCode = locale.split('-')[1]?.toUpperCase() || locale.slice(0, 2).toUpperCase();
-    return {
-      country: countryCode,
-      useMercadoPago: MERCADOPAGO_COUNTRIES.includes(countryCode)
-    };
-  } catch {
-    return { country: 'AR', useMercadoPago: true };
-  }
+    return { country: countryCode, useMercadoPago: MERCADOPAGO_COUNTRIES.includes(countryCode) };
+  } catch { return { country: 'AR', useMercadoPago: true }; }
 }
 
-// Hook personalizado
 function usePaymentMethod() {
-  const [paymentMethod, setPaymentMethod] = useState<{
-    type: PaymentMethodType;
-    country: string;
-  }>({ type: 'loading', country: 'AR' });
-
+  const [paymentMethod, setPaymentMethod] = useState<{ type: PaymentMethodType; country: string }>({ type: 'loading', country: 'AR' });
   useEffect(() => {
     let mounted = true;
-
-    detectUserCountry().then(({ country, useMercadoPago }) => {
-      if (mounted) {
-        setPaymentMethod({
-          type: useMercadoPago ? 'mercadopago' : 'paypal',
-          // type: 'paypal',
-          country
-        });
-      }
-    });
-
+    detectUserCountry().then(({ country, useMercadoPago }) => { if (mounted) setPaymentMethod({ type: useMercadoPago ? 'mercadopago' : 'paypal', country }); });
     return () => { mounted = false; };
   }, []);
-
   return paymentMethod;
 }
 
-// ============ COMPONENTE DE PAGO INLINE ============
-
+// ============ COMPONENTE DE PAGO INLINE (SOLO PAGO ÚNICO) ============
 function InlinePaymentGateway({
-  amount,
-  currency,
-  description,
-  onPaymentSuccess,
-  onPaymentError,
-  mode,
-  bookSlug
+  amount, currency, description, onPaymentSuccess, onPaymentError, bookSlug
 }: {
-  amount: number;
-  currency: string;
-  description: string;
-  onPaymentSuccess: (paymentType: 'oneTime' | 'subscription') => Promise<void>;
+  amount: number; currency: string; description: string;
+  onPaymentSuccess: () => Promise<void>;
   onPaymentError?: (error: Error) => void;
-  mode: 'oneTime' | 'subscription';
   bookSlug: string;
 }) {
-  const { success, error: showError, info } = useToast();
+  const { success, error: showError } = useToast();
   const paymentMethod = usePaymentMethod();
   const [isProcessing, setIsProcessing] = useState(false);
-  const [mpPreferenceId, setMpPreferenceId] = useState<string | null>(null);
   const [showMpFallback, setShowMpFallback] = useState(false);
 
-  // Inicializar MercadoPago
   useEffect(() => {
     if (paymentMethod.type === 'mercadopago') {
       initMercadoPago(process.env.NEXT_PUBLIC_MP_PUBLIC_KEY || '', {
@@ -140,42 +92,23 @@ function InlinePaymentGateway({
     }
   }, [paymentMethod]);
 
-  // Crear preferencia de MercadoPago
-  // Dentro de InlinePaymentGateway component
-
   const createMercadoPagoPreference = useCallback(async () => {
     try {
-      // 🔥 PRECIO FIJO EN USD QUE QUERÉS COBRAR
-      const PRICE_USD = 10.00; // 👈 Esto es lo que querés: $10 USD
-
+      const PRICE_USD = 10.00;
       const response = await fetch('/api/mercadopago/create-preference', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: description,
-          priceUSD: PRICE_USD,
-          bookSlug: bookSlug
-        })
+        body: JSON.stringify({ title: description, priceUSD: PRICE_USD, bookSlug })
       });
-
       if (!response.ok) {
         const err = await response.json().catch(() => ({}));
-        console.error('❌ API Error:', err);
         showError(err.detail || 'Error al crear preferencia');
         setShowMpFallback(true);
         return null;
       }
-
       const { preferenceId, initPoint } = await response.json();
-
-      // 🔥 Redirección MANUAL a MercadoPago (más confiable)
-      if (initPoint) {
-        window.location.href = initPoint;
-        return preferenceId;
-      }
-
+      if (initPoint) window.location.href = initPoint;
       return preferenceId;
-
     } catch (err: any) {
       console.error('❌ Error MP:', err);
       showError('Error con MercadoPago');
@@ -183,83 +116,42 @@ function InlinePaymentGateway({
       return null;
     }
   }, [description, bookSlug, showError]);
-  // Handlers de éxito
+
   const handlePaymentComplete = async (provider: 'mercadopago' | 'paypal', paymentData: any) => {
     try {
       setIsProcessing(true);
-
-      // Verificar pago en backend
-      const endpoint = provider === 'mercadopago'
-        ? '/api/mercadopago/webhook'
-        : '/api/paypal/verify';
-
+      const endpoint = provider === 'mercadopago' ? '/api/mercadopago/webhook' : '/api/paypal/verify';
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          paymentId: paymentData.payment_id || paymentData.orderID,
-          status: paymentData.status || paymentData.status,
-          mode,
-          bookSlug
-        })
+        body: JSON.stringify({ paymentId: paymentData.payment_id || paymentData.orderID, status: paymentData.status, bookSlug })
       });
-
       if (response.ok) {
-        // Guardar acceso en localStorage (en producción, usar DB + auth)
-        if (mode === 'oneTime') {
-          localStorage.setItem(`purchased_${bookSlug}`, 'true');
-        } else {
-          localStorage.setItem('subscription_active', 'true');
-        }
-
-        await onPaymentSuccess(mode);
+        // 🔑 ACCESO POR PAGO ÚNICO
+        localStorage.setItem(`purchased_${bookSlug}`, 'true');
+        await onPaymentSuccess();
         success(`🎉 ¡Pago exitoso con ${provider === 'mercadopago' ? 'MercadoPago' : 'PayPal'}!`);
-      } else {
-        throw new Error('Verificación fallida');
-      }
+      } else throw new Error('Verificación fallida');
     } catch (err) {
       console.error(`Error verificando pago ${provider}:`, err);
       showError('Hubo un problema confirmando tu pago. Contactanos.');
       onPaymentError?.(err as Error);
-    } finally {
-      setIsProcessing(false);
-    }
+    } finally { setIsProcessing(false); }
   };
 
-  // Sandbox mode para desarrollo
-  // const isSandbox = process.env.NODE_ENV === 'development';
-
   const isSandbox = false;
-
   const handleSandboxSuccess = async () => {
     await new Promise(r => setTimeout(r, 1500));
-
-    if (mode === 'oneTime') {
-      localStorage.setItem(`purchased_${bookSlug}`, 'true');
-    } else {
-      localStorage.setItem('subscription_active', 'true');
-    }
-
-    await onPaymentSuccess(mode);
+    localStorage.setItem(`purchased_${bookSlug}`, 'true');
+    await onPaymentSuccess();
     success('🧪 [SANDBOX] Pago simulado exitoso');
   };
 
-  // Formatear precio
-  // Formatear precio para mostrar (ARS)
   const formatAmount = () => {
-    // Si currency es USD, mostramos el equivalente en ARS
-    const displayAmount = currency === 'USD'
-      ? 10.00 * 1000 // 👈 Tasa de ejemplo: $10 USD = $10.000 ARS
-      : amount / 100;
-
-    return new Intl.NumberFormat('es-AR', {
-      style: 'currency',
-      currency: 'ARS',
-      minimumFractionDigits: 0
-    }).format(displayAmount);
+    const displayAmount = currency === 'USD' ? 10.00 * 1000 : amount / 100;
+    return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', minimumFractionDigits: 0 }).format(displayAmount);
   };
 
-  // Loading state
   if (paymentMethod.type === 'loading') {
     return (
       <div className="flex items-center justify-center py-8">
@@ -271,214 +163,73 @@ function InlinePaymentGateway({
 
   return (
     <div className="space-y-4">
-      {/* Badge de método seleccionado */}
-      <motion.div
-        initial={{ opacity: 0, y: -10 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="flex items-center justify-center gap-2 text-xs text-gray-400"
-      >
+      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="flex items-center justify-center gap-2 text-xs text-gray-400">
         <Globe size={12} />
-        <span>
-          Método para tu región ({paymentMethod.country}):{' '}
-          <strong className="text-blue-400">
-            {paymentMethod.type === 'mercadopago' ? 'MercadoPago' : 'PayPal'}
-          </strong>
-        </span>
+        <span>Método para tu región ({paymentMethod.country}): <strong className="text-blue-400">{paymentMethod.type === 'mercadopago' ? 'MercadoPago' : 'PayPal'}</strong></span>
       </motion.div>
 
-      {/* ===== MODO SANDBOX ===== */}
       {isSandbox && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          className="p-3 bg-purple-500/20 border border-purple-500/40 rounded-xl"
-        >
-          <div className="flex items-center gap-2 text-purple-300 text-xs mb-2">
-            <Zap size={12} className="animate-pulse" />
-            <span>Modo Desarrollo • Pagos Simulados</span>
-          </div>
-          <button
-            onClick={handleSandboxSuccess}
-            disabled={isProcessing}
-            className="w-full py-2.5 bg-purple-500 hover:bg-purple-600 disabled:opacity-50 text-white font-semibold rounded-lg text-sm transition flex items-center justify-center gap-2"
-          >
-            {isProcessing ? <Loader2 className="animate-spin" size={16} /> : <CheckCircle size={16} />}
-            Simular Pago Exitoso ({formatAmount()})
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="p-3 bg-purple-500/20 border border-purple-500/40 rounded-xl">
+          <div className="flex items-center gap-2 text-purple-300 text-xs mb-2"><Zap size={12} className="animate-pulse" /><span>Modo Desarrollo • Pagos Simulados</span></div>
+          <button onClick={handleSandboxSuccess} disabled={isProcessing} className="w-full py-2.5 bg-purple-500 hover:bg-purple-600 disabled:opacity-50 text-white font-semibold rounded-lg text-sm transition flex items-center justify-center gap-2">
+            {isProcessing ? <Loader2 className="animate-spin" size={16} /> : <CheckCircle size={16} />} Simular Pago Exitoso ({formatAmount()})
           </button>
         </motion.div>
       )}
 
-      {/* ===== MERCADOPAGO ===== */}
       {!isSandbox && paymentMethod.type === 'mercadopago' && !showMpFallback && (
-        <motion.div
-          initial={{ opacity: 0, scale: 0.98 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="space-y-3"
-        >
+        <motion.div initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} className="space-y-3">
           <div className="p-4 bg-blue-500/10 border border-blue-500/30 rounded-xl">
-            <div className="flex items-center gap-2 text-blue-400 text-sm mb-2">
-              <Shield size={14} />
-              <span>Pago seguro con MercadoPago</span>
-            </div>
-            <p className="text-xs text-gray-400">
-              Aceptamos todas las tarjetas, efectivo en rapipago/pago fácil, y transferencia.
-            </p>
+            <div className="flex items-center gap-2 text-blue-400 text-sm mb-2"><Shield size={14} /><span>Pago seguro con MercadoPago</span></div>
+            <p className="text-xs text-gray-400">Aceptamos todas las tarjetas, efectivo en rapipago/pago fácil, y transferencia.</p>
           </div>
-
-          {/* Botón de checkout */}
           <div className="flex justify-center">
-            {/* Botón de checkout con monto en ARS */}
-            <button
-              onClick={async () => {
-                const preferenceId = await createMercadoPagoPreference();
-                if (preferenceId) {
-                  window.location.href = `https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=${preferenceId}`;
-                }
-              }}
-              disabled={isProcessing}
-              className="w-full py-3 bg-[#009EE3] hover:bg-[#0088cc] disabled:opacity-50 text-white font-semibold rounded-xl transition flex items-center justify-center gap-2 shadow-lg"
-            >
-              {isProcessing ? (
-                <Loader2 className="animate-spin" size={18} />
-              ) : (
-                <CreditCard size={18} />
-              )}
-              Pagar con MercadoPago • {formatAmount()}
+            <button onClick={async () => { const pid = await createMercadoPagoPreference(); if (pid) window.location.href = `https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=${pid}`; }} disabled={isProcessing} className="w-full py-3 bg-[#009EE3] hover:bg-[#0088cc] disabled:opacity-50 text-white font-semibold rounded-xl transition flex items-center justify-center gap-2 shadow-lg">
+              {isProcessing ? <Loader2 className="animate-spin" size={18} /> : <CreditCard size={18} />} Pagar con MercadoPago • {formatAmount()}
             </button>
           </div>
-
-          {/* Fallback manual */}
-          <button
-            onClick={() => setShowMpFallback(true)}
-            className="w-full py-2 text-xs text-blue-400 hover:text-blue-300 underline flex items-center justify-center gap-1"
-          >
-            <AlertCircle size={12} />
-            ¿Problemas? Abrir checkout en nueva ventana
-          </button>
+          <button onClick={() => setShowMpFallback(true)} className="w-full py-2 text-xs text-blue-400 hover:text-blue-300 underline flex items-center justify-center gap-1"><AlertCircle size={12} /> ¿Problemas? Abrir checkout en nueva ventana</button>
         </motion.div>
       )}
 
-      {/* ===== PAYPAL ===== */}
       {!isSandbox && paymentMethod.type === 'paypal' && (
-        <PayPalScriptProvider
-          options={{
-            clientId: process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID!,
-            currency: 'USD'
-          }}
-        >
-          <PayPalButtons
-            style={{
-              layout: 'vertical',
-              color: 'gold',
-              shape: 'rect',
-              label: 'pay'
-            }}
-            createOrder={async () => {
-              const res = await fetch('/api/paypal/create-order', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  amount: amount / 100, // 👈 USA EL PRECIO REAL
-                  currency: 'USD',
-                  description: description
-                })
-              });
-
-              const data = await res.json();
-              return data.orderID;
-            }}
-
-
-            onApprove={async (data, actions) => {
-              const details = await actions.order?.capture();
-
-              await handlePaymentComplete('paypal', {
-                orderID: data.orderID,
-                status: details?.status
-              });
-            }}
-
-            onError={(err) => {
-              console.error(err);
-
-              showError('❌ Error en PayPal. Intentá nuevamente o usá otro método.');
-            }}
-
-          />
+        <PayPalScriptProvider options={{ clientId: process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID!, currency: 'USD' }}>
+          <PayPalButtons style={{ layout: 'vertical', color: 'gold', shape: 'rect', label: 'pay' }} createOrder={async () => { const res = await fetch('/api/paypal/create-order', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ amount: amount / 100, currency: 'USD', description }) }); const d = await res.json(); return d.orderID; }} onApprove={async (data, actions) => { const details = await actions.order?.capture(); await handlePaymentComplete('paypal', { orderID: data.orderID, status: details?.status }); }} onError={(err) => { console.error(err); showError('❌ Error en PayPal. Intentá nuevamente o usá otro método.'); }} />
         </PayPalScriptProvider>
       )}
 
-      {/* ===== FALLBACK MERCADOPAGO → PAYPAL ===== */}
       <AnimatePresence>
         {showMpFallback && paymentMethod.type === 'mercadopago' && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
-            className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-xl"
-          >
-            <div className="flex items-start gap-3">
-              <AlertCircle className="text-amber-400 flex-shrink-0 mt-0.5" size={18} />
-              <div>
-                <p className="text-sm text-amber-300 font-medium mb-2">
-                  ¿Problemas con MercadoPago?
-                </p>
-                <p className="text-xs text-gray-400 mb-3">
-                  Podés intentar con PayPal como método alternativo.
-                </p>
-                <button
-                  onClick={() => {
-                    // Forzar recarga para detectar PayPal
-                    window.location.reload();
-                  }}
-                  className="text-xs text-amber-400 hover:text-amber-300 underline flex items-center gap-1"
-                >
-                  Intentar con PayPal
-                  <Globe size={10} />
-                </button>
-              </div>
-            </div>
+          <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-xl">
+            <div className="flex items-start gap-3"><AlertCircle className="text-amber-400 flex-shrink-0 mt-0.5" size={18} /><div><p className="text-sm text-amber-300 font-medium mb-2">¿Problemas con MercadoPago?</p><p className="text-xs text-gray-400 mb-3">Podés intentar con PayPal como método alternativo.</p><button onClick={() => window.location.reload()} className="text-xs text-amber-400 hover:text-amber-300 underline flex items-center gap-1">Intentar con PayPal <Globe size={10} /></button></div></div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* ===== INFO DE SEGURIDAD ===== */}
       <div className="flex items-center justify-center gap-4 pt-4 border-t border-white/10 text-[10px] text-gray-500">
-        <div className="flex items-center gap-1">
-          <Lock size={10} />
-          <span>SSL Encriptado</span>
-        </div>
-        <div className="flex items-center gap-1">
-          <Shield size={10} />
-          <span>{paymentMethod.type === 'mercadopago' ? 'MercadoPago' : 'PayPal'} Protegido</span>
-        </div>
-        <div className="flex items-center gap-1">
-          <CreditCard size={10} />
-          <span>Sin almacenamos tus datos</span>
-        </div>
+        <div className="flex items-center gap-1"><Lock size={10} /><span>SSL Encriptado</span></div>
+        <div className="flex items-center gap-1"><Shield size={10} /><span>{paymentMethod.type === 'mercadopago' ? 'MercadoPago' : 'PayPal'} Protegido</span></div>
+        <div className="flex items-center gap-1"><CreditCard size={10} /><span>Sin almacenamos tus datos</span></div>
       </div>
     </div>
   );
 }
 
 // ============ COMPONENTE PRINCIPAL ============
-
-export default function BookDetailPage({ params }: { params: Promise<{ slug: string }> }) {
-  const { slug } = use(params);
+export default function BookDetailPage() {
+  // 🔑 SLUG HARDCODEADO PARA RUTA ESTÁTICA
+  const slug = 'la-magia';
+  
   const { success, info, error: showError, ToastContainer } = useToast();
-
-  // Estados principales
   const [hasAccess, setHasAccess] = useState(false);
   const [showPaywall, setShowPaywall] = useState(false);
-  const [selectedPlan, setSelectedPlan] = useState<'oneTime' | 'subscription'>('oneTime');
   const [showTestPanel, setShowTestPanel] = useState(false);
   const [activeChapter, setActiveChapter] = useState<Chapter | null>(null);
   const [isPlayerExpanded, setIsPlayerExpanded] = useState(false);
   const [currentPlaybackTime, setCurrentPlaybackTime] = useState(0);
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
 
-  // ============ DATOS DEL LIBRO ============
-
+  // ============ 📚 DATOS: LA MAGIA ============
   const book: Book = {
     slug: slug,
     title: "La Magia",
@@ -526,42 +277,26 @@ export default function BookDetailPage({ params }: { params: Promise<{ slug: str
       { id: 'cap34', title: 'Día 31 - ejercicios Dia 28', duration: '4:30', durationSeconds: 270, src: '/audios/5-dia28.mp3', isPreview: false },
       { id: 'cap35', title: 'Día 32 - Tu futuro mágico', duration: '4:30', durationSeconds: 270, src: '/audios/6-dia29.mp3', isPreview: false },
       { id: 'cap36', title: 'Día 33 - Tus polvos mágicos', duration: '4:30', durationSeconds: 270, src: '/audios/7-dia30.mp3', isPreview: false },
-     
-      
-      
-      
-      
-      
-      
-      
-      
-
     ]
   };
 
   // ============ EFECTOS ============
-
   useEffect(() => {
     const checkAccess = () => {
       try {
-        const purchased = localStorage.getItem(`purchased_${book.slug}`);
-        const subscribed = localStorage.getItem('subscription_active');
-        if (purchased || subscribed) {
+        // 🔑 SOLO CHEQUEA PAGO ÚNICO
+        const purchased = localStorage.getItem(`purchased_${slug}`);
+        if (purchased) {
           setHasAccess(true);
-          console.log('✅ Acceso concedido para:', book.slug);
+          console.log(`✅ Acceso concedido para: ${slug}`);
         }
-      } catch (e) {
-        console.warn('⚠️ Error al verificar acceso:', e);
-      }
+      } catch (e) { console.warn('⚠️ Error al verificar acceso:', e); }
     };
     checkAccess();
-  }, [book.slug]);
+  }, [slug]);
 
-  const handleTimeUpdate = useCallback((time: number) => {
-    setCurrentPlaybackTime(time);
-  }, []);
+  const handleTimeUpdate = useCallback((time: number) => setCurrentPlaybackTime(time), []);
 
-  // Animación post-pago (evitar ejecutar en SSR)
   useEffect(() => {
     if (hasAccess) {
       const timer = setTimeout(() => {
@@ -570,9 +305,7 @@ export default function BookDetailPage({ params }: { params: Promise<{ slug: str
           const wasLocked = el.querySelector('svg[data-lucide="lock"]');
           if (wasLocked) {
             el.classList.add('ring-2', 'ring-green-400/50', 'animate-pulse');
-            setTimeout(() => {
-              el.classList.remove('ring-2', 'ring-green-400/50', 'animate-pulse');
-            }, 2000 + idx * 100);
+            setTimeout(() => el.classList.remove('ring-2', 'ring-green-400/50', 'animate-pulse'), 2000 + idx * 100);
           }
         });
       }, 500);
@@ -580,131 +313,67 @@ export default function BookDetailPage({ params }: { params: Promise<{ slug: str
     }
   }, [hasAccess]);
 
-  // Agregar dentro del componente BookDetailPage, junto a los otros useEffect:
-
   useEffect(() => {
-    // 🔍 Detectar si el usuario volvió después de pagar
     const urlParams = new URLSearchParams(window.location.search);
     const paymentStatus = urlParams.get('payment');
-    const mode = urlParams.get('mode') as 'oneTime' | 'subscription' | null;
 
     if (paymentStatus === 'success' && !hasAccess) {
       console.log('✅ Pago exitoso detectado, otorgando acceso...');
-
-      // Otorgar acceso inmediatamente
-      if (mode === 'oneTime') {
-        localStorage.setItem(`purchased_${book.slug}`, 'true');
-      } else {
-        localStorage.setItem('subscription_active', 'true');
-      }
+      localStorage.setItem(`purchased_${slug}`, 'true');
       setHasAccess(true);
-
-      // Limpiar la URL para que no se vea feo
       window.history.replaceState({}, document.title, window.location.pathname);
-
-      // Mostrar mensaje de éxito
       success('🎉 ¡Pago confirmado! Acceso desbloqueado.');
-
-      // Scroll suave hacia los capítulos
-      setTimeout(() => {
-        document.getElementById('catalogo')?.scrollIntoView({
-          behavior: 'smooth',
-          block: 'start'
-        });
-      }, 500);
+      setTimeout(() => document.getElementById('catalogo')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 500);
     }
-  }, [book.slug, hasAccess, success]);
+  }, [slug, hasAccess, success]);
 
   // ============ FUNCIONES DE ACCESO/PAGO ============
-
-  const simulatePayment = async (type: 'oneTime' | 'subscription') => {
+  const simulatePayment = async () => {
     const btn = document.activeElement as HTMLButtonElement;
     if (btn) {
       btn.disabled = true;
       const originalText = btn.innerHTML;
       btn.innerHTML = '<span class="animate-pulse">Procesando...</span>';
-
       await new Promise(resolve => setTimeout(resolve, 1200));
-
       try {
-        if (type === 'oneTime') {
-          localStorage.setItem(`purchased_${book.slug}`, 'true');
-        } else {
-          localStorage.setItem('subscription_active', 'true');
-        }
-
+        localStorage.setItem(`purchased_${slug}`, 'true');
         setHasAccess(true);
         setShowPaywall(false);
-        success('✅ ¡Pago simulado exitoso! Acceso completo desbloqueado.');
-
-      } catch (e) {
-        showError('❌ Error al procesar el pago simulado');
-        console.error(e);
-      } finally {
-        if (btn) {
-          btn.disabled = false;
-          btn.innerHTML = originalText;
-        }
-      }
+        success(`✅ ¡Pago simulado exitoso! Acceso desbloqueado para "${book.title}".`);
+      } catch (e) { showError('❌ Error al procesar el pago simulado'); console.error(e); }
+      finally { if (btn) { btn.disabled = false; btn.innerHTML = originalText; } }
     }
   };
 
   const resetAccess = () => {
     try {
-      localStorage.removeItem(`purchased_${book.slug}`);
-      localStorage.removeItem('subscription_active');
+      localStorage.removeItem(`purchased_${slug}`);
       setHasAccess(false);
       setActiveChapter(null);
       setCurrentPlaybackTime(0);
-      info('🔄 Acceso reseteado para testing.');
-    } catch (e) {
-      console.warn('⚠️ Error al resetear acceso:', e);
-    }
+      info(`🔄 Acceso reseteado para "${book.title}".`);
+    } catch (e) { console.warn('⚠️ Error al resetear acceso:', e); }
   };
 
   const handleUnlock = () => setShowPaywall(true);
 
-  const onPaymentSuccess = async (paymentType: 'oneTime' | 'subscription') => {
+  const onPaymentSuccess = async () => {
     try {
-      if (paymentType === 'oneTime') {
-        localStorage.setItem(`purchased_${book.slug}`, 'true');
-      } else {
-        localStorage.setItem('subscription_active', 'true');
-      }
-
+      localStorage.setItem(`purchased_${slug}`, 'true');
       setHasAccess(true);
       setShowPaywall(false);
       success('🎉 ¡Bienvenido! Tu audiolibro está listo para escuchar.');
-
-      setTimeout(() => {
-        document.getElementById('catalogo')?.scrollIntoView({
-          behavior: 'smooth',
-          block: 'start'
-        });
-      }, 800);
-
-    } catch (e) {
-      showError('❌ Error al activar el acceso');
-      console.error(e);
-    }
+      setTimeout(() => document.getElementById('catalogo')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 800);
+    } catch (e) { showError('❌ Error al activar el acceso'); console.error(e); }
   };
 
   // ============ FUNCIONES DE REPRODUCCIÓN ============
-
   const handlePlayChapter = (chapter: Chapter) => {
     if (chapter.isPreview || hasAccess) {
       setActiveChapter(chapter);
       setIsPlayerExpanded(true);
       setCurrentPlaybackTime(0);
-
-      if (window.innerWidth >= 768) {
-        setTimeout(() => {
-          document.getElementById('chapter-player')?.scrollIntoView({
-            behavior: 'smooth',
-            block: 'center'
-          });
-        }, 150);
-      }
+      if (window.innerWidth >= 768) setTimeout(() => document.getElementById('chapter-player')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 150);
     } else {
       info('🔒 Desbloqueá el libro para escuchar este capítulo.');
       const chapterEl = document.getElementById(`chapter-${chapter.id}`);
@@ -717,12 +386,8 @@ export default function BookDetailPage({ params }: { params: Promise<{ slug: str
     if (hasAccess && activeChapter) {
       const currentIndex = book.chapters.findIndex(c => c.id === activeChapter.id);
       const nextChapter = book.chapters[currentIndex + 1];
-
       if (nextChapter && !nextChapter.isPreview) {
-        setTimeout(() => {
-          setActiveChapter(nextChapter);
-          info(`🎧 Reproduciendo: ${nextChapter.title}`);
-        }, 2000);
+        setTimeout(() => { setActiveChapter(nextChapter); info(`🎧 Reproduciendo: ${nextChapter.title}`); }, 2000);
       }
     }
   }, [activeChapter, book.chapters, hasAccess]);
@@ -731,399 +396,146 @@ export default function BookDetailPage({ params }: { params: Promise<{ slug: str
     if (!activeChapter) return;
     const currentIndex = book.chapters.findIndex(c => c.id === activeChapter.id);
     const prevChapter = book.chapters[currentIndex - 1];
-
-    if (prevChapter && (prevChapter.isPreview || hasAccess)) {
-      setActiveChapter(prevChapter);
-      setCurrentPlaybackTime(0);
-    }
+    if (prevChapter && (prevChapter.isPreview || hasAccess)) { setActiveChapter(prevChapter); setCurrentPlaybackTime(0); }
   };
 
   const handleNextChapter = () => {
     if (!activeChapter) return;
     const currentIndex = book.chapters.findIndex(c => c.id === activeChapter.id);
     const nextChapter = book.chapters[currentIndex + 1];
-
-    if (nextChapter && (nextChapter.isPreview || hasAccess)) {
-      setActiveChapter(nextChapter);
-      setCurrentPlaybackTime(0);
-    } else if (!nextChapter) {
-      info('🎉 ¡Has completado el audiolibro!');
-    } else {
-      info('🔒 Capítulo bloqueado. Desbloqueá el libro para continuar.');
-    }
+    if (nextChapter && (nextChapter.isPreview || hasAccess)) { setActiveChapter(nextChapter); setCurrentPlaybackTime(0); }
+    else if (!nextChapter) info('🎉 ¡Has completado el audiolibro!');
+    else info('🔒 Capítulo bloqueado. Desbloqueá el libro para continuar.');
   };
 
-  // ============ UTILIDADES ============
-
-  const formatPrice = (cents: number) => {
-    return new Intl.NumberFormat('es-AR', {
-      style: 'currency',
-      currency: 'ARS',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0
-    }).format(cents / 100);
-  };
-
+  const formatPrice = (cents: number) => new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(cents / 100);
   const isDev = process.env.NODE_ENV === 'development';
   const previewChapter = book.chapters.find(c => c.isPreview);
 
   // ============ RENDER ============
-
   return (
     <main className="min-h-screen bg-gray-950 text-white relative pb-32">
       <ToastContainer />
-
-      {/* ===== DEV MODE PANEL ===== */}
+      
+      {/* DEV MODE PANEL */}
       {isDev && (
         <div className="fixed top-4 right-4 z-50">
-          <motion.button
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-            onClick={() => setShowTestPanel(!showTestPanel)}
-            className="flex items-center gap-2 px-3 py-1.5 bg-purple-600/90 hover:bg-purple-700 text-white text-xs font-bold rounded-full shadow-lg backdrop-blur-sm border border-purple-400/30 transition"
-            aria-expanded={showTestPanel}
-            aria-controls="dev-panel"
-          >
-            <Zap size={12} className="animate-pulse" />
-            DEV MODE
-            <ChevronDown size={12} className={`transition-transform ${showTestPanel ? 'rotate-180' : ''}`} />
+          <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={() => setShowTestPanel(!showTestPanel)} className="flex items-center gap-2 px-3 py-1.5 bg-purple-600/90 hover:bg-purple-700 text-white text-xs font-bold rounded-full shadow-lg backdrop-blur-sm border border-purple-400/30 transition">
+            <Zap size={12} className="animate-pulse" /> DEV MODE <ChevronDown size={12} className={`transition-transform ${showTestPanel ? 'rotate-180' : ''}`} />
           </motion.button>
         </div>
       )}
 
-      {/* Panel de Testing */}
       <AnimatePresence>
         {isDev && showTestPanel && (
-          <motion.div
-            id="dev-panel"
-            initial={{ opacity: 0, x: 100, scale: 0.95 }}
-            animate={{ opacity: 1, x: 0, scale: 1 }}
-            exit={{ opacity: 0, x: 100, scale: 0.95 }}
-            transition={{ type: "spring", damping: 25, stiffness: 300 }}
-            className="fixed top-16 right-4 z-50 w-80 bg-gray-900/95 border border-purple-500/30 rounded-2xl p-4 shadow-2xl backdrop-blur-md"
-          >
+          <motion.div id="dev-panel" initial={{ opacity: 0, x: 100, scale: 0.95 }} animate={{ opacity: 1, x: 0, scale: 1 }} exit={{ opacity: 0, x: 100, scale: 0.95 }} transition={{ type: "spring", damping: 25, stiffness: 300 }} className="fixed top-16 right-4 z-50 w-80 bg-gray-900/95 border border-purple-500/30 rounded-2xl p-4 shadow-2xl backdrop-blur-md">
             <div className="flex items-center justify-between mb-4">
-              <h4 className="font-bold text-purple-400 text-sm flex items-center gap-2">
-                <Zap size={14} className="animate-pulse" />
-                Panel de Testing
-              </h4>
-              <motion.button
-                whileHover={{ scale: 1.1 }}
-                whileTap={{ scale: 0.9 }}
-                onClick={() => setShowTestPanel(false)}
-                className="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-white/10 transition"
-                aria-label="Cerrar panel"
-              >
-                <X size={16} />
-              </motion.button>
+              <h4 className="font-bold text-purple-400 text-sm flex items-center gap-2"><Zap size={14} className="animate-pulse" /> Panel de Testing</h4>
+              <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }} onClick={() => setShowTestPanel(false)} className="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-white/10 transition"><X size={16} /></motion.button>
             </div>
-
             <div className="space-y-3 text-xs">
               <div className="p-3 rounded-lg bg-white/5 border border-white/10">
                 <p className="text-gray-400 mb-1">Estado de acceso:</p>
-                <div className={`flex items-center gap-2 font-medium ${hasAccess ? 'text-green-400' : 'text-red-400'}`}>
-                  {hasAccess ? <CheckCircle size={14} /> : <Lock size={14} />}
-                  {hasAccess ? '✅ Acceso concedido' : '🔒 Sin acceso'}
-                </div>
+                <div className={`flex items-center gap-2 font-medium ${hasAccess ? 'text-green-400' : 'text-red-400'}`}>{hasAccess ? <CheckCircle size={14} /> : <Lock size={14} />} {hasAccess ? '✅ Acceso concedido' : '🔒 Sin acceso'}</div>
               </div>
-
               <div>
                 <p className="text-gray-400 mb-2">Simular pago:</p>
                 <div className="space-y-2">
-                  <motion.button
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    onClick={() => simulatePayment('oneTime')}
-                    className="w-full px-3 py-2.5 bg-amber-500 hover:bg-amber-600 text-black font-semibold rounded-xl text-xs transition flex items-center justify-center gap-2 shadow-lg"
-                  >
-                    <Zap size={14} />
-                    Compra Única ({formatPrice(book.price.oneTime)})
-                  </motion.button>
-
+                  <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={simulatePayment} className="w-full px-3 py-2.5 bg-amber-500 hover:bg-amber-600 text-black font-semibold rounded-xl text-xs transition flex items-center justify-center gap-2 shadow-lg"><Zap size={14} /> Simular Compra ({formatPrice(book.price.oneTime)})</motion.button>
                 </div>
               </div>
-
               <div className="p-3 rounded-lg bg-white/5 border border-white/10 font-mono text-[10px]">
                 <p className="text-gray-400 mb-1">Debug:</p>
-                <p>Slug: <span className="text-purple-400">{book.slug}</span></p>
+                <p>Slug: <span className="text-purple-400">{slug}</span></p>
                 <p>Capítulo activo: <span className="text-amber-400">{activeChapter?.title || 'Ninguno'}</span></p>
                 <p>Tiempo: <span className="text-green-400">{Math.floor(currentPlaybackTime)}s</span></p>
               </div>
-
-              <motion.button
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                onClick={resetAccess}
-                className="w-full px-3 py-2.5 bg-red-500/20 hover:bg-red-500/30 text-red-400 font-medium rounded-xl text-xs transition border border-red-500/30 flex items-center justify-center gap-2"
-              >
-                <X size={14} />
-                Resetear Acceso
-              </motion.button>
+              <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={resetAccess} className="w-full px-3 py-2.5 bg-red-500/20 hover:bg-red-500/30 text-red-400 font-medium rounded-xl text-xs transition border border-red-500/30 flex items-center justify-center gap-2"><X size={14} /> Resetear Acceso</motion.button>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* ===== HERO SECTION ===== */}
-      <section
-        className="relative h-[55vh] md:h-[60vh] flex items-end p-6 md:p-8"
-        style={{
-          backgroundImage: `linear-gradient(to top, #030712 0%, rgba(3,7,18,0.8) 40%, transparent 100%), url(${book.cover})`,
-          backgroundSize: 'cover',
-          backgroundPosition: 'center 30%',
-          backgroundBlendMode: 'multiply'
-        }}
-      >
+      {/* HERO */}
+      <section className="relative h-[55vh] md:h-[60vh] flex items-end p-6 md:p-8" style={{ backgroundImage: `linear-gradient(to top, #030712 0%, rgba(3,7,18,0.8) 40%, transparent 100%), url(${book.cover})`, backgroundSize: 'cover', backgroundPosition: 'center 30%', backgroundBlendMode: 'multiply' }}>
         <div className="absolute inset-0 bg-gradient-to-t from-gray-950 via-gray-950/50 to-transparent pointer-events-none" />
-
-        <motion.div
-          initial={{ opacity: 0, y: 30 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6, ease: "easeOut" }}
-          className="relative max-w-4xl z-10"
-        >
-          <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-amber-500/20 border border-amber-500/30 rounded-full text-amber-400 text-xs font-medium mb-4">
-            <Headphones size={14} />
-            <span>Audiolibro • {book.totalDuration}</span>
-          </div>
-
+        <motion.div initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6, ease: "easeOut" }} className="relative max-w-4xl z-10">
+          <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-amber-500/20 border border-amber-500/30 rounded-full text-amber-400 text-xs font-medium mb-4"><Headphones size={14} /><span>Audiolibro • {book.totalDuration}</span></div>
           <h1 className="text-4xl md:text-6xl font-bold mb-3 leading-tight">{book.title}</h1>
-
-          <p className="text-gray-300 text-lg md:text-xl mb-4 font-light">
-            por <span className="text-white font-medium">{book.author}</span>
-          </p>
-
+          <p className="text-gray-300 text-lg md:text-xl mb-4 font-light">por <span className="text-white font-medium">{book.author}</span></p>
           <div className="flex flex-wrap items-center gap-4 text-sm text-gray-400">
-            <div className="flex items-center gap-1.5">
-              <CheckCircle size={14} className="text-green-400" />
-              <span>{book.chapters.length} capítulos</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <Headphones size={14} className="text-amber-400" />
-              <span>{book.totalDuration} de contenido</span>
-            </div>
-            {previewChapter && (
-              <span className="px-2 py-0.5 bg-amber-500/20 text-amber-400 rounded-full text-xs">
-                🎧 Preview gratis
-              </span>
-            )}
-
-            {/* Botón de volver */}
-
-            <Link
-              href="/"
-              className="px-3 py-1.5 bg-amber-500/20 text-amber-400 rounded-full text-xs"
-            >
-              Volver
-            </Link>
-
-
-
-
+            <div className="flex items-center gap-1.5"><CheckCircle size={14} className="text-green-400" /><span>{book.chapters.length} capítulos</span></div>
+            <div className="flex items-center gap-1.5"><Headphones size={14} className="text-amber-400" /><span>{book.totalDuration} de contenido</span></div>
+            {previewChapter && <span className="px-2 py-0.5 bg-amber-500/20 text-amber-400 rounded-full text-xs">🎧 Preview gratis</span>}
+            <Link href="/" className="px-3 py-1.5 bg-amber-500/20 text-amber-400 rounded-full text-xs">Volver</Link>
           </div>
         </motion.div>
       </section>
 
-      {/* ===== DESCRIPCIÓN ===== */}
+      {/* DESCRIPCIÓN */}
       <section className="px-6 md:px-8 py-8 max-w-4xl mx-auto">
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2 }}
-          className="prose prose-invert prose-lg max-w-none"
-        >
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="prose prose-invert prose-lg max-w-none">
           <p className="text-gray-300 leading-relaxed">{book.description}</p>
         </motion.div>
       </section>
 
-      {/* ===== PREVIEW DEL PRÓLOGO ===== */}
+      {/* PREVIEW */}
       <section className="px-6 md:px-8 py-4 max-w-4xl mx-auto">
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.3 }}
-          className="bg-white/5 border border-white/10 rounded-2xl p-5 md:p-6 backdrop-blur-sm"
-        >
-          <div className="flex items-center gap-3 mb-5">
-            <div className="p-2 rounded-lg bg-amber-500/20">
-              <Play className="text-amber-400" size={20} />
-            </div>
-            <div>
-              <h3 className="text-lg font-semibold text-white">{previewChapter?.title || 'Vista Previa'}</h3>
-              <p className="text-sm text-gray-400">Escuchá gratis antes de decidir</p>
-            </div>
-          </div>
-
-          <AudioPlayer
-            title={previewChapter?.title || 'Preview'}
-            chapter="Capítulo de muestra"
-            src={previewChapter?.src || ''}
-            isPreview={true}
-            previewDuration={90}
-            skipInterval={15}
-            onPreviewEnd={() => {
-              info('🔒 Preview finalizado. Desbloqueá el libro para continuar escuchando.');
-            }}
-            onTimeUpdate={handleTimeUpdate}
-            onSpeedChange={setPlaybackSpeed}
-          />
-
-          {/* CTA Post-Preview con Pagos Reales */}
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="bg-white/5 border border-white/10 rounded-2xl p-5 md:p-6 backdrop-blur-sm">
+          <div className="flex items-center gap-3 mb-5"><div className="p-2 rounded-lg bg-amber-500/20"><Play className="text-amber-400" size={20} /></div><div><h3 className="text-lg font-semibold text-white">{previewChapter?.title || 'Vista Previa'}</h3><p className="text-sm text-gray-400">Escuchá gratis antes de decidir</p></div></div>
+          <AudioPlayer title={previewChapter?.title || 'Preview'} chapter="Capítulo de muestra" src={previewChapter?.src || ''} isPreview={true} previewDuration={90} skipInterval={15} onPreviewEnd={() => info('🔒 Preview finalizado. Desbloqueá el libro para continuar escuchando.')} onTimeUpdate={handleTimeUpdate} onSpeedChange={setPlaybackSpeed} />
           {!hasAccess && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: 0.5 }}
-              className="mt-6 p-4 bg-gradient-to-r from-amber-500/10 to-transparent rounded-xl border border-amber-500/20"
-            >
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.5 }} className="mt-6 p-4 bg-gradient-to-r from-amber-500/10 to-transparent rounded-xl border border-amber-500/20">
               <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-                <div>
-                  <p className="text-gray-300 font-medium mb-1">¿Te gustó lo que escuchaste?</p>
-                  <p className="text-sm text-gray-400">Desbloqueá los {book.chapters.length} capítulos completos.</p>
-                </div>
-
+                <div><p className="text-gray-300 font-medium mb-1">¿Te gustó lo que escuchaste?</p><p className="text-sm text-gray-400">Desbloqueá los {book.chapters.length} capítulos completos.</p></div>
                 <div className="flex flex-wrap gap-3">
                   {isDev ? (
-                    <>
-                      <motion.button
-                        whileHover={{ scale: 1.02 }}
-                        whileTap={{ scale: 0.98 }}
-                        onClick={() => { setSelectedPlan('oneTime'); simulatePayment('oneTime'); }}
-                        className="px-5 py-2.5 bg-amber-500 text-black font-bold rounded-xl hover:bg-amber-400 transition flex items-center gap-2 text-sm shadow-lg"
-                      >
-                        <Zap size={16} />
-                        Simular Compra
-                      </motion.button>
-                      <motion.button
-                        whileHover={{ scale: 1.02 }}
-                        whileTap={{ scale: 0.98 }}
-                        onClick={() => { setSelectedPlan('subscription'); simulatePayment('subscription'); }}
-                        className="px-5 py-2.5 bg-white/10 text-white font-semibold rounded-xl hover:bg-white/20 transition border border-white/20 text-sm"
-                      >
-                        Simular Suscripción
-                      </motion.button>
-                    </>
+                    <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={simulatePayment} className="px-5 py-2.5 bg-amber-500 text-black font-bold rounded-xl hover:bg-amber-400 transition flex items-center gap-2 text-sm shadow-lg"><Zap size={16} /> Simular Compra</motion.button>
                   ) : (
-                    <>
-                      <motion.button
-                        whileHover={{ scale: 1.02 }}
-                        whileTap={{ scale: 0.98 }}
-                        onClick={() => { setSelectedPlan('oneTime'); handleUnlock(); }}
-                        className="px-5 py-2.5 bg-amber-500 text-black font-bold rounded-xl hover:bg-amber-400 transition text-sm shadow-lg flex items-center gap-2"
-                      >
-                        <CreditCard size={16} />
-                        {formatPrice(book.price.oneTime)} • Pago único
-                      </motion.button>
-
-                    </>
+                    <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={handleUnlock} className="px-5 py-2.5 bg-amber-500 text-black font-bold rounded-xl hover:bg-amber-400 transition text-sm shadow-lg flex items-center gap-2"><CreditCard size={16} /> {formatPrice(book.price.oneTime)} • Pago único</motion.button>
                   )}
                 </div>
               </div>
-
-              {isDev && (
-                <p className="text-[10px] text-purple-400 mt-3 flex items-center gap-1">
-                  <Zap size={10} />
-                  Modo desarrollo: Pagos simulados • Sin cargo real
-                </p>
-              )}
+              {isDev && <p className="text-[10px] text-purple-400 mt-3 flex items-center gap-1"><Zap size={10} /> Modo desarrollo: Pagos simulados • Sin cargo real</p>}
             </motion.div>
           )}
         </motion.div>
       </section>
 
-      {/* ===== PLAYER DEL CAPÍTULO ACTIVO ===== */}
+      {/* PLAYER */}
       <AnimatePresence>
         {activeChapter && (
-          <motion.section
-            id="chapter-player"
-            initial={{ opacity: 0, height: 0, y: 20 }}
-            animate={{ opacity: 1, height: 'auto', y: 0 }}
-            exit={{ opacity: 0, height: 0, y: -20 }}
-            transition={{ type: "spring", damping: 25, stiffness: 300 }}
-            className="px-6 md:px-8 py-4 max-w-4xl mx-auto"
-          >
+          <motion.section id="chapter-player" initial={{ opacity: 0, height: 0, y: 20 }} animate={{ opacity: 1, height: 'auto', y: 0 }} exit={{ opacity: 0, height: 0, y: -20 }} transition={{ type: "spring", damping: 25, stiffness: 300 }} className="px-6 md:px-8 py-4 max-w-4xl mx-auto">
             <motion.div className="bg-gradient-to-br from-amber-500/10 via-white/5 to-white/5 border border-amber-500/20 rounded-2xl overflow-hidden" layout>
-              {/* Header del player */}
               <div className="flex items-center justify-between p-4 md:p-5 border-b border-white/10">
                 <div className="flex items-center gap-3 min-w-0">
-                  <motion.div animate={{ rotate: isPlayerExpanded ? 360 : 0 }} transition={{ duration: 0.5 }} className="p-2 rounded-lg bg-amber-500/20 flex-shrink-0">
-                    <Headphones className="text-amber-400" size={20} />
-                  </motion.div>
-                  <div className="min-w-0">
-                    <h3 className="text-base md:text-lg font-semibold text-white truncate">{activeChapter.title}</h3>
-                    <p className="text-sm text-gray-400 truncate">{book.title}</p>
-                  </div>
+                  <motion.div animate={{ rotate: isPlayerExpanded ? 360 : 0 }} transition={{ duration: 0.5 }} className="p-2 rounded-lg bg-amber-500/20 flex-shrink-0"><Headphones className="text-amber-400" size={20} /></motion.div>
+                  <div className="min-w-0"><h3 className="text-base md:text-lg font-semibold text-white truncate">{activeChapter.title}</h3><p className="text-sm text-gray-400 truncate">{book.title}</p></div>
                 </div>
                 <div className="flex items-center gap-2">
-                  {activeChapter.isPreview && (
-                    <span className="hidden sm:inline-flex items-center px-2 py-0.5 bg-amber-500/20 text-amber-400 text-[10px] font-medium rounded-full">PREVIEW</span>
-                  )}
-                  <motion.button
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
-                    onClick={() => setIsPlayerExpanded(!isPlayerExpanded)}
-                    className="p-2 rounded-full hover:bg-white/10 transition text-gray-400 hover:text-white"
-                  >
-                    {isPlayerExpanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
-                  </motion.button>
+                  {activeChapter.isPreview && <span className="hidden sm:inline-flex items-center px-2 py-0.5 bg-amber-500/20 text-amber-400 text-[10px] font-medium rounded-full">PREVIEW</span>}
+                  <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={() => setIsPlayerExpanded(!isPlayerExpanded)} className="p-2 rounded-full hover:bg-white/10 transition text-gray-400 hover:text-white">{isPlayerExpanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}</motion.button>
                 </div>
               </div>
-
-              {/* Contenido */}
               <AnimatePresence mode="wait">
                 {isPlayerExpanded ? (
                   <motion.div key="expanded" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="p-4 md:p-6">
-                    <AudioPlayer
-                      title={activeChapter.title}
-                      chapter={`Capítulo ${book.chapters.findIndex(c => c.id === activeChapter.id) + 1}`}
-                      src={activeChapter.src}
-                      isPreview={activeChapter.isPreview}
-                      previewDuration={90}
-                      skipInterval={15}
-                      onPreviewEnd={handleChapterEnd}
-                      onTimeUpdate={handleTimeUpdate}
-                      onSpeedChange={setPlaybackSpeed}
-                    />
+                    <AudioPlayer title={activeChapter.title} chapter={`Capítulo ${book.chapters.findIndex(c => c.id === activeChapter.id) + 1}`} src={activeChapter.src} isPreview={activeChapter.isPreview} previewDuration={90} skipInterval={15} onPreviewEnd={handleChapterEnd} onTimeUpdate={handleTimeUpdate} onSpeedChange={setPlaybackSpeed} />
                     <div className="flex items-center justify-between mt-4 pt-4 border-t border-white/10">
-                      <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={handlePreviousChapter} disabled={book.chapters.indexOf(activeChapter) === 0} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition text-sm">
-                        <SkipBack size={16} /><span className="hidden sm:inline">Anterior</span>
-                      </motion.button>
+                      <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={handlePreviousChapter} disabled={book.chapters.indexOf(activeChapter) === 0} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition text-sm"><SkipBack size={16} /><span className="hidden sm:inline">Anterior</span></motion.button>
                       <span className="text-xs text-gray-500">{book.chapters.indexOf(activeChapter) + 1} / {book.chapters.length}</span>
-                      <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={handleNextChapter} disabled={book.chapters.indexOf(activeChapter) === book.chapters.length - 1} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition text-sm">
-                        <span className="hidden sm:inline">Siguiente</span><SkipForward size={16} />
-                      </motion.button>
+                      <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={handleNextChapter} disabled={book.chapters.indexOf(activeChapter) === book.chapters.length - 1} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition text-sm"><span className="hidden sm:inline">Siguiente</span><SkipForward size={16} /></motion.button>
                     </div>
                   </motion.div>
                 ) : (
                   <motion.div key="compact" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="p-3 md:p-4">
                     <div className="flex items-center gap-3">
-                      <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }} onClick={() => {
-                        const audio = document.querySelector(`audio[src="${activeChapter.src}"]`) as HTMLAudioElement;
-                        if (audio) audio.paused ? audio.play() : audio.pause();
-                      }} className="p-3 rounded-full bg-amber-500 hover:bg-amber-600 text-black transition shadow-lg flex-shrink-0">
-                        <Play size={18} />
-                      </motion.button>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-white truncate">{activeChapter.title}</p>
-                        <div className="flex items-center gap-2 text-xs text-gray-400">
-                          <span>{activeChapter.duration}</span>
-                          {activeChapter.isPreview && <span className="px-1.5 py-0.5 bg-amber-500/20 text-amber-400 rounded text-[10px]">preview</span>}
-                        </div>
-                      </div>
+                      <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }} onClick={() => { const audio = document.querySelector(`audio[src="${activeChapter.src}"]`) as HTMLAudioElement; if (audio) audio.paused ? audio.play() : audio.pause(); }} className="p-3 rounded-full bg-amber-500 hover:bg-amber-600 text-black transition shadow-lg flex-shrink-0"><Play size={18} /></motion.button>
+                      <div className="flex-1 min-w-0"><p className="text-sm font-medium text-white truncate">{activeChapter.title}</p><div className="flex items-center gap-2 text-xs text-gray-400"><span>{activeChapter.duration}</span>{activeChapter.isPreview && <span className="px-1.5 py-0.5 bg-amber-500/20 text-amber-400 rounded text-[10px]">preview</span>}</div></div>
                       {!activeChapter.isPreview && (
                         <div className="flex items-center gap-1">
-                          <motion.button whileTap={{ scale: 0.9 }} onClick={() => {
-                            const audio = document.querySelector(`audio[src="${activeChapter.src}"]`) as HTMLAudioElement;
-                            if (audio) audio.currentTime = Math.max(0, audio.currentTime - 15);
-                          }} className="p-2 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition">
-                            <SkipBack size={16} />
-                          </motion.button>
-                          <motion.button whileTap={{ scale: 0.9 }} onClick={() => {
-                            const audio = document.querySelector(`audio[src="${activeChapter.src}"]`) as HTMLAudioElement;
-                            if (audio) audio.currentTime = Math.min(audio.duration || 9999, audio.currentTime + 15);
-                          }} className="p-2 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition">
-                            <SkipForward size={16} />
-                          </motion.button>
+                          <motion.button whileTap={{ scale: 0.9 }} onClick={() => { const audio = document.querySelector(`audio[src="${activeChapter.src}"]`) as HTMLAudioElement; if (audio) audio.currentTime = Math.max(0, audio.currentTime - 15); }} className="p-2 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition"><SkipBack size={16} /></motion.button>
+                          <motion.button whileTap={{ scale: 0.9 }} onClick={() => { const audio = document.querySelector(`audio[src="${activeChapter.src}"]`) as HTMLAudioElement; if (audio) audio.currentTime = Math.min(audio.duration || 9999, audio.currentTime + 15); }} className="p-2 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition"><SkipForward size={16} /></motion.button>
                         </div>
                       )}
                     </div>
@@ -1135,69 +547,26 @@ export default function BookDetailPage({ params }: { params: Promise<{ slug: str
         )}
       </AnimatePresence>
 
-      {/* ===== LISTA DE CAPÍTULOS ===== */}
+      {/* LISTA DE CAPÍTULOS */}
       <section className="px-6 md:px-8 py-8 max-w-4xl mx-auto">
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }}>
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-2xl font-bold flex items-center gap-2"><List size={24} className="text-amber-400" /> Contenido</h2>
-            <span className="text-sm text-gray-400">{book.chapters.filter(c => c.isPreview).length} gratis • {book.chapters.filter(c => !c.isPreview).length} premium</span>
-          </div>
-
+          <div className="flex items-center justify-between mb-6"><h2 className="text-2xl font-bold flex items-center gap-2"><List size={24} className="text-amber-400" /> Contenido</h2><span className="text-sm text-gray-400">{book.chapters.filter(c => c.isPreview).length} gratis • {book.chapters.filter(c => !c.isPreview).length} premium</span></div>
           <div className="space-y-2">
             {book.chapters.map((chapter, idx) => {
               const isPlayable = chapter.isPreview || hasAccess;
               const isActive = activeChapter?.id === chapter.id;
               const chapterNumber = idx + 1;
-
               return (
-                <motion.div
-                  id={`chapter-${chapter.id}`}
-                  key={chapter.id}
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: 0.4 + (idx * 0.03) }}
-                  onClick={() => isPlayable && handlePlayChapter(chapter)}
-                  className={`group flex items-center justify-between p-4 rounded-xl border cursor-pointer transition-all duration-200 ${isActive
-                    ? 'bg-amber-500/10 border-amber-500/40 ring-1 ring-amber-500/30'
-                    : isPlayable
-                      ? 'bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20 hover:shadow-lg hover:shadow-black/20'
-                      : 'bg-white/[0.02] border-white/5 cursor-not-allowed opacity-70'
-                    }`}
-                  role="button"
-                  tabIndex={isPlayable ? 0 : -1}
-                  aria-disabled={!isPlayable}
-                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (isPlayable) handlePlayChapter(chapter); } }}
-                >
+                <motion.div id={`chapter-${chapter.id}`} key={chapter.id} initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.4 + (idx * 0.03) }} onClick={() => isPlayable && handlePlayChapter(chapter)} className={`group flex items-center justify-between p-4 rounded-xl border cursor-pointer transition-all duration-200 ${isActive ? 'bg-amber-500/10 border-amber-500/40 ring-1 ring-amber-500/30' : isPlayable ? 'bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20 hover:shadow-lg hover:shadow-black/20' : 'bg-white/[0.02] border-white/5 cursor-not-allowed opacity-70'}`} role="button" tabIndex={isPlayable ? 0 : -1} aria-disabled={!isPlayable} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (isPlayable) handlePlayChapter(chapter); } }}>
                   <div className="flex items-center gap-4 min-w-0">
-                    <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 transition-colors ${isActive
-                      ? 'bg-amber-500/20 text-amber-400'
-                      : isPlayable ? 'bg-white/10 text-gray-300 group-hover:bg-amber-500/20 group-hover:text-amber-400' : 'bg-white/5 text-gray-600'
-                      }`}>
-                      {isActive ? (
-                        <motion.div animate={{ scale: [1, 1.15, 1] }} transition={{ repeat: Infinity, duration: 1.5, ease: "easeInOut" }}>
-                          <Headphones size={18} />
-                        </motion.div>
-                      ) : isPlayable ? (
-                        <span className="text-sm font-medium">{chapterNumber}</span>
-                      ) : (
-                        <Lock size={16} />
-                      )}
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 transition-colors ${isActive ? 'bg-amber-500/20 text-amber-400' : isPlayable ? 'bg-white/10 text-gray-300 group-hover:bg-amber-500/20 group-hover:text-amber-400' : 'bg-white/5 text-gray-600'}`}>
+                      {isActive ? <motion.div animate={{ scale: [1, 1.15, 1] }} transition={{ repeat: Infinity, duration: 1.5, ease: "easeInOut" }}><Headphones size={18} /></motion.div> : isPlayable ? <span className="text-sm font-medium">{chapterNumber}</span> : <Lock size={16} />}
                     </div>
-                    <div className="min-w-0 flex-1">
-                      <p className={`font-medium transition-colors truncate ${isPlayable ? 'text-white group-hover:text-amber-400' : 'text-gray-500'}`}>{chapter.title}</p>
-                      <div className="flex items-center gap-3 text-sm text-gray-500 mt-0.5">
-                        <span>{chapter.duration}</span>
-                        {chapter.description && <span className="hidden md:inline text-gray-600">• {chapter.description}</span>}
-                      </div>
-                    </div>
+                    <div className="min-w-0 flex-1"><p className={`font-medium transition-colors truncate ${isPlayable ? 'text-white group-hover:text-amber-400' : 'text-gray-500'}`}>{chapter.title}</p><div className="flex items-center gap-3 text-sm text-gray-500 mt-0.5"><span>{chapter.duration}</span>{chapter.description && <span className="hidden md:inline text-gray-600">• {chapter.description}</span>}</div></div>
                   </div>
                   <div className="flex items-center gap-3 flex-shrink-0">
                     {chapter.isPreview && <span className="text-[10px] px-2 py-1 bg-amber-500/20 text-amber-400 rounded-full font-medium">GRATIS</span>}
-                    {hasAccess && !chapter.isPreview && (
-                      <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ delay: 0.5 + (idx * 0.03) }}>
-                        <CheckCircle size={18} className="text-green-400" />
-                      </motion.div>
-                    )}
+                    {hasAccess && !chapter.isPreview && <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ delay: 0.5 + (idx * 0.03) }}><CheckCircle size={18} className="text-green-400" /></motion.div>}
                     {isPlayable && !isActive && <ChevronDown size={18} className="text-gray-500 group-hover:text-amber-400 transition-colors" />}
                     {!isPlayable && <span className="text-[10px] text-gray-600">🔒</span>}
                   </div>
@@ -1205,128 +574,55 @@ export default function BookDetailPage({ params }: { params: Promise<{ slug: str
               );
             })}
           </div>
-
-          {/* CTA final con Paywall Modal */}
           {!hasAccess && book.chapters.some(c => !c.isPreview) && (
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.8 }}
-              className="mt-8 p-6 bg-gradient-to-br from-amber-500/10 via-purple-500/5 to-transparent rounded-2xl border border-amber-500/20 text-center"
-            >
+            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.8 }} className="mt-8 p-6 bg-gradient-to-br from-amber-500/10 via-purple-500/5 to-transparent rounded-2xl border border-amber-500/20 text-center">
               <h3 className="text-xl font-bold text-white mb-2">¿Listo para la magia completa?</h3>
               <p className="text-gray-400 mb-5 max-w-md mx-auto">Desbloqueá los {book.chapters.filter(c => !c.isPreview).length} capítulos premium y transformá tu vida en 28 días.</p>
-
               <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
-                <motion.button
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  onClick={() => { setSelectedPlan('oneTime'); handleUnlock(); }}
-                  className="px-6 py-3 bg-amber-500 hover:bg-amber-600 text-black font-bold rounded-xl transition shadow-lg shadow-amber-500/25 flex items-center gap-2"
-                >
-                  <CreditCard size={18} />
-                  Obtener Acceso • {formatPrice(book.price.oneTime)}
-                </motion.button>
-
+                <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={handleUnlock} className="px-6 py-3 bg-amber-500 hover:bg-amber-600 text-black font-bold rounded-xl transition shadow-lg shadow-amber-500/25 flex items-center gap-2"><CreditCard size={18} /> Obtener Acceso • {formatPrice(book.price.oneTime)}</motion.button>
               </div>
             </motion.div>
           )}
         </motion.div>
       </section>
 
-      {/* ===== MODAL DE PAGO (PAYWALL) ===== */}
+      {/* PAYWALL MODAL - SOLO PAGO ÚNICO */}
       <AnimatePresence>
         {showPaywall && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
-            onClick={(e) => e.target === e.currentTarget && setShowPaywall(false)}
-          >
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-gray-900 border border-white/10 rounded-2xl p-6 max-w-md w-full shadow-2xl max-h-[90vh] overflow-y-auto"
-              onClick={(e) => e.stopPropagation()}
-            >
-              {/* Header */}
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm" onClick={(e) => e.target === e.currentTarget && setShowPaywall(false)}>
+            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }} className="bg-gray-900 border border-white/10 rounded-2xl p-6 max-w-md w-full shadow-2xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
               <div className="flex items-center justify-between mb-6">
                 <div>
-                  <h3 className="text-xl font-bold text-white">
-                    {selectedPlan === 'oneTime' ? 'Compra Única' : 'Suscripción Mensual'}
-                  </h3>
+                  <h3 className="text-xl font-bold text-white">Compra Única</h3>
                   <p className="text-gray-400 text-sm">{book.title}</p>
                 </div>
-                <motion.button
-                  whileHover={{ scale: 1.1 }}
-                  whileTap={{ scale: 0.9 }}
-                  onClick={() => setShowPaywall(false)}
-                  className="p-2 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition"
-                >
-                  <X size={20} />
-                </motion.button>
+                <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }} onClick={() => setShowPaywall(false)} className="p-2 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition"><X size={20} /></motion.button>
               </div>
-
-              {/* Resumen */}
               <div className="p-4 bg-white/5 rounded-xl mb-6">
-                <div className="flex justify-between text-sm mb-2">
-                  <span className="text-gray-400">Producto:</span>
-                  <span className="text-white">{book.title}</span>
-                </div>
-                <div className="flex justify-between text-sm mb-2">
-                  <span className="text-gray-400">Plan:</span>
-                  <span className="text-white">{selectedPlan === 'oneTime' ? 'Acceso de por vida' : 'Acceso mensual'}</span>
-                </div>
-                <div className="flex justify-between text-lg font-bold pt-3 border-t border-white/10">
-                  <span className="text-gray-300">Total:</span>
-                  <span className="text-amber-400">
-                    {formatPrice(book.price.oneTime)}
-                  </span>
-                </div>
+                <div className="flex justify-between text-sm mb-2"><span className="text-gray-400">Producto:</span><span className="text-white">{book.title}</span></div>
+                <div className="flex justify-between text-sm mb-2"><span className="text-gray-400">Plan:</span><span className="text-white">Acceso de por vida</span></div>
+                <div className="flex justify-between text-lg font-bold pt-3 border-t border-white/10"><span className="text-gray-300">Total:</span><span className="text-amber-400">{formatPrice(book.price.oneTime)}</span></div>
               </div>
-
-              {/* Gateway de pago real */}
-              <InlinePaymentGateway
-                amount={book.price.oneTime}
-                currency="ARS"
-                description={`Audiolibro: ${book.title} - ${selectedPlan === 'oneTime' ? 'Compra única' : 'Suscripción mensual'}`}
-                onPaymentSuccess={onPaymentSuccess}
-                onPaymentError={(err) => {
-                  console.error('Payment error:', err);
-                  setShowPaywall(false);
-                }}
-                mode={selectedPlan}
-                bookSlug={book.slug}
+              <InlinePaymentGateway 
+                amount={book.price.oneTime} 
+                currency="ARS" 
+                description={`Audiolibro: ${book.title} - Compra única`} 
+                onPaymentSuccess={onPaymentSuccess} 
+                onPaymentError={(err) => { console.error('Payment error:', err); setShowPaywall(false); }} 
+                bookSlug={slug} 
               />
-
-              {/* Términos */}
-              <p className="text-[10px] text-gray-500 text-center mt-4">
-                Al continuar, aceptás nuestros{' '}
-                <a href="/terminos" className="text-amber-400 hover:underline">Términos</a> y{' '}
-                <a href="/privacidad" className="text-amber-400 hover:underline">Política de Privacidad</a>.
-              </p>
+              <p className="text-[10px] text-gray-500 text-center mt-4">Al continuar, aceptás nuestros <a href="/terminos" className="text-amber-400 hover:underline">Términos</a> y <a href="/privacidad" className="text-amber-400 hover:underline">Política de Privacidad</a>.</p>
             </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* ===== FOOTER ===== */}
       <footer className="px-6 md:px-8 py-12 text-center text-gray-600 text-sm">
         <p>© {new Date().getFullYear()} La Magia de la Gratitud • Audiolibros</p>
         <p className="mt-1 text-xs opacity-70">La magia está en vos ✨</p>
       </footer>
 
-      {/* ===== ESTILOS GLOBALES ===== */}
-      <style jsx global>{`
-        @keyframes shake {
-          0%, 100% { transform: translateX(0); }
-          25% { transform: translateX(-4px); }
-          75% { transform: translateX(4px); }
-        }
-        .animate-shake { animation: shake 0.3s ease-in-out; }
-      `}</style>
+      <style jsx global>{`@keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } } .animate-shake { animation: shake 0.3s ease-in-out; }`}</style>
     </main>
   );
 }
