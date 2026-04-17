@@ -520,6 +520,16 @@ export default function BookDetailPage({ params }: { params: Promise<{ slug: str
       { id: 'cap28', title: 'Día 25 - Sigue las indicaciones de la magia', duration: '5:03', durationSeconds: 303, src: '/audios/29_dia-25.mp3', isPreview: false },
       { id: 'cap29', title: 'Día 26 - Transforma mágicamente los errores en bendiciones', duration: '4:30', durationSeconds: 270, src: '/audios/31-1_dia-26.mp3', isPreview: false },
       { id: 'cap30', title: 'Día 27 - El espejo mágico', duration: '4:30', durationSeconds: 270, src: '/audios/32_dia-27.mp3', isPreview: false },
+      { id: 'cap31', title: 'Día 28 - Recuerda la Magia del Amor', duration: '4:30', durationSeconds: 270, src: '/audios/1-dia28.mp3', isPreview: false },   
+      { id: 'cap32', title: 'Día 29 - Recordar las bendiciones', duration: '4:30', durationSeconds: 270, src: '/audios/3-dia28.mp3', isPreview: false },
+      { id: 'cap33', title: 'Día 30 - No hay un numero fijo de bendiciones', duration: '4:30', durationSeconds: 270, src: '/audios/4-dia28.mp3', isPreview: false },
+      { id: 'cap34', title: 'Día 31 - ejercicios Dia 28', duration: '4:30', durationSeconds: 270, src: '/audios/5-dia28.mp3', isPreview: false },
+      { id: 'cap35', title: 'Día 32 - Tu futuro mágico', duration: '4:30', durationSeconds: 270, src: '/audios/6-dia29.mp3', isPreview: false },
+      { id: 'cap36', title: 'Día 33 - Tus polvos mágicos', duration: '4:30', durationSeconds: 270, src: '/audios/7-dia30.mp3', isPreview: false },
+     
+      
+      
+      
       
       
       
