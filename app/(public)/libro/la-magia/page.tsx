@@ -483,7 +483,7 @@ export default function BookDetailPage() {
       <section className="px-6 md:px-8 py-4 max-w-4xl mx-auto">
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="bg-white/5 border border-white/10 rounded-2xl p-5 md:p-6 backdrop-blur-sm">
           <div className="flex items-center gap-3 mb-5"><div className="p-2 rounded-lg bg-amber-500/20"><Play className="text-amber-400" size={20} /></div><div><h3 className="text-lg font-semibold text-white">{previewChapter?.title || 'Vista Previa'}</h3><p className="text-sm text-gray-400">Escuchá gratis antes de decidir</p></div></div>
-          <AudioPlayer title={previewChapter?.title || 'Preview'} chapter="Capítulo de muestra" src={previewChapter?.src || ''} isPreview={true} previewDuration={90} skipInterval={15} onPreviewEnd={() => info('🔒 Preview finalizado. Desbloqueá el libro para continuar escuchando.')} onTimeUpdate={handleTimeUpdate} onSpeedChange={setPlaybackSpeed} />
+          <AudioPlayer title={previewChapter?.title || 'Preview'} chapter="Capítulo de muestra" src={previewChapter?.src || ''} isPreview={true} previewDuration={90} skipInterval={15} onPreviewEnd={() => info('🔒 Preview finalizado. Desbloqueá el libro para continuar escuchando.')} onTimeUpdate={handleTimeUpdate} onSpeedChange={setPlaybackSpeed}  onUnlockClick={handleUnlock} />
           {!hasAccess && (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.5 }} className="mt-6 p-4 bg-gradient-to-r from-amber-500/10 to-transparent rounded-xl border border-amber-500/20">
               <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
@@ -520,7 +520,7 @@ export default function BookDetailPage() {
               <AnimatePresence mode="wait">
                 {isPlayerExpanded ? (
                   <motion.div key="expanded" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="p-4 md:p-6">
-                    <AudioPlayer title={activeChapter.title} chapter={`Capítulo ${book.chapters.findIndex(c => c.id === activeChapter.id) + 1}`} src={activeChapter.src} isPreview={activeChapter.isPreview} previewDuration={90} skipInterval={15} onPreviewEnd={handleChapterEnd} onTimeUpdate={handleTimeUpdate} onSpeedChange={setPlaybackSpeed} />
+                    <AudioPlayer title={activeChapter.title} chapter={`Capítulo ${book.chapters.findIndex(c => c.id === activeChapter.id) + 1}`} src={activeChapter.src} isPreview={activeChapter.isPreview} previewDuration={90} skipInterval={15} onPreviewEnd={handleChapterEnd} onTimeUpdate={handleTimeUpdate} onSpeedChange={setPlaybackSpeed}  onUnlockClick={handleUnlock} />
                     <div className="flex items-center justify-between mt-4 pt-4 border-t border-white/10">
                       <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={handlePreviousChapter} disabled={book.chapters.indexOf(activeChapter) === 0} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition text-sm"><SkipBack size={16} /><span className="hidden sm:inline">Anterior</span></motion.button>
                       <span className="text-xs text-gray-500">{book.chapters.indexOf(activeChapter) + 1} / {book.chapters.length}</span>

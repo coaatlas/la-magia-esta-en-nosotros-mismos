@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Play, Pause, SkipBack, SkipForward, Volume2, Lock } from "lucide-react";
+import { Play, Pause, SkipBack, SkipForward, Volume2, Lock, CreditCard } from "lucide-react";
 
 export interface AudioPlayerProps {
   src: string;
@@ -11,9 +11,10 @@ export interface AudioPlayerProps {
   isPreview?: boolean;
   previewDuration?: number;
   onPreviewEnd?: () => void;
-  skipInterval?: number; // 👈 Nuevo: segundos para skip (default: 15)
+  skipInterval?: number;
   onTimeUpdate?: (time: number) => void;
   onSpeedChange?: React.Dispatch<React.SetStateAction<number>>;
+  onUnlockClick?: () => void; // 👈 NUEVO: callback para abrir modal de pago
 }
 
 export default function AudioPlayer({ 
@@ -23,9 +24,10 @@ export default function AudioPlayer({
   isPreview = false, 
   previewDuration = 90,
   onPreviewEnd,
-  skipInterval = 15, // 👈 Default: 15 segundos
+  skipInterval = 15,
   onTimeUpdate,
-  onSpeedChange
+  onSpeedChange,
+  onUnlockClick  // 👈 NUEVO: recibir la prop
 }: AudioPlayerProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -75,7 +77,6 @@ export default function AudioPlayer({
     }
   };
 
-  // ⏪ NUEVO: Retroceder X segundos
   const skipBackward = () => {
     if (isPreview) {
       setShowLockModal(true);
@@ -90,7 +91,6 @@ export default function AudioPlayer({
     setProgress(newTime);
   };
 
-  // ⏩ NUEVO: Adelantar X segundos
   const skipForward = () => {
     if (isPreview) {
       setShowLockModal(true);
@@ -100,11 +100,9 @@ export default function AudioPlayer({
     const audio = audioRef.current;
     if (!audio) return;
     
-    // Respetar límite de preview si aplica
     const maxTime = isPreview ? Math.min(previewDuration, duration || previewDuration) : (duration || 0);
     const newTime = Math.min(maxTime, audio.currentTime + skipInterval);
     
-    // Si al adelantar supera el límite de preview, mostrar modal
     if (isPreview && newTime >= previewDuration) {
       audio.pause();
       setIsPlaying(false);
@@ -148,7 +146,6 @@ export default function AudioPlayer({
     return `${min}:${sec < 10 ? "0" : ""}${sec}`;
   };
 
-  // Reinicia estado si cambia la fuente
   useEffect(() => {
     setError(null);
     setProgress(0);
@@ -157,17 +154,13 @@ export default function AudioPlayer({
     setShowLockModal(false);
   }, [src]);
 
-  // Calcular progreso máximo para preview
   const maxProgress = isPreview ? Math.min(previewDuration, duration || previewDuration) : (duration || 0);
 
-  // 👇 NUEVO: Atajos de teclado para skip
   useEffect(() => {
-    if (isPreview) return; // Desactivar atajos en preview
+    if (isPreview) return;
     
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
-        return; // Ignorar si el foco está en un input
-      }
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
       
       if (e.key === 'ArrowLeft') {
         e.preventDefault();
@@ -185,7 +178,6 @@ export default function AudioPlayer({
 
   return (
     <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-lg max-w-md mx-auto mt-6 border border-gray-200 dark:border-gray-700">
-      {/* Header con badge de preview */}
       <div className="flex items-start justify-between mb-4">
         <div>
           <h2 className="text-xl font-bold text-gray-900 dark:text-white">{title}</h2>
@@ -222,21 +214,16 @@ export default function AudioPlayer({
           }
         }}
         onLoadedMetadata={() => {
-          if (audioRef.current) {
-            setDuration(audioRef.current.duration);
-          }
+          if (audioRef.current) setDuration(audioRef.current.duration);
         }}
         onError={() => setError("Error al cargar el archivo de audio. Verifica la ruta o el formato.")}
         onEnded={() => {
           setIsPlaying(false);
-          if (isPreview && onPreviewEnd) {
-            onPreviewEnd();
-          }
+          if (isPreview && onPreviewEnd) onPreviewEnd();
         }}
         className="hidden"
       />
 
-      {/* Progress Bar */}
       <div className="relative mb-3">
         <input
           type="range"
@@ -257,14 +244,12 @@ export default function AudioPlayer({
             mb-2`}
           aria-label="Barra de progreso del audio"
         />
-        {/* Barra de progreso visual */}
         <div 
           className="absolute top-1/2 -translate-y-1/2 left-0 h-2 bg-blue-600 rounded-l-lg pointer-events-none transition-all"
           style={{ width: `${duration ? (Math.min(progress, maxProgress) / maxProgress) * 100 : 0}%` }}
         />
       </div>
 
-      {/* Time Display */}
       <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400 mb-4 font-mono">
         <span aria-label="Tiempo transcurrido">{formatTime(Math.min(progress, maxProgress))}</span>
         <span aria-label="Duración total">
@@ -272,9 +257,7 @@ export default function AudioPlayer({
         </span>
       </div>
 
-      {/* Controls */}
       <div className="flex items-center justify-center gap-2">
-        {/* 👇 NUEVOS: Botones de skip */}
         {!isPreview && (
           <>
             <motion.button
@@ -307,7 +290,6 @@ export default function AudioPlayer({
           </>
         )}
         
-        {/* Botón de velocidad (oculto en preview) */}
         {!isPreview && (
           <motion.button
             whileTap={{ scale: 0.95 }}
@@ -321,7 +303,6 @@ export default function AudioPlayer({
           </motion.button>
         )}
         
-        {/* Botón Play/Pause principal */}
         <motion.button
           whileTap={{ scale: 0.95 }}
           onClick={togglePlay}
@@ -337,29 +318,14 @@ export default function AudioPlayer({
           {isPlaying ? <Pause size={20} /> : <Play size={20} />}
           <span className="hidden sm:inline">{isPlaying ? "Pausa" : "Reproducir"}</span>
         </motion.button>
-
-        {/* Icono de lock en preview 
-        {isPreview && (
-          <motion.button
-            whileTap={{ scale: 0.95 }}
-            onClick={() => setShowLockModal(true)}
-            className="p-3 rounded-xl bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600 transition"
-            title="Desbloquear contenido completo"
-            aria-label="Desbloquear contenido completo"
-          >
-            <Lock size={18} />
-          </motion.button>
-        )}*/}
       </div>
 
-      {/* 👇 NUEVO: Hint de atajos de teclado (solo desktop) */}
       {!isPreview && (
         <p className="text-[10px] text-center text-gray-400 dark:text-gray-500 mt-3 hidden sm:block">
           💡 Usá <kbd className="px-1 py-0.5 bg-gray-100 dark:bg-gray-700 rounded">←</kbd> y <kbd className="px-1 py-0.5 bg-gray-100 dark:bg-gray-700 rounded">→</kbd> para saltar {skipInterval}s
         </p>
       )}
 
-      {/* Modal de bloqueo para preview (sin cambios) */}
       {showLockModal && isPreview && (
         <motion.div
           initial={{ opacity: 0 }}
@@ -387,12 +353,17 @@ export default function AudioPlayer({
                 Desbloqueá el audiolibro completo para acceder a todos los capítulos.
               </p>
               <div className="flex flex-col gap-3">
-                <a
-                  href="/contact"
-                  className="w-full px-4 py-3 bg-amber-500 hover:bg-amber-600 text-black font-semibold rounded-xl transition text-center"
+                {/* 👇 BOTÓN DE PAGO MODIFICADO */}
+                <button
+                  onClick={() => {
+                    onUnlockClick?.(); // 👈 Ejecuta la función del padre (abre modal de pago)
+                    setShowLockModal(false); // 👈 Cierra este modal de preview
+                  }}
+                  className="w-full px-4 py-3 bg-amber-500 hover:bg-amber-600 text-black font-semibold rounded-xl transition text-center flex items-center justify-center gap-2"
                 >
-                  Desbloquear Ahora
-                </a>
+                  <CreditCard size={18} /> 💳 Desbloquear Ahora
+                </button>
+                
                 <button
                   onClick={() => setShowLockModal(false)}
                   className="w-full px-4 py-3 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 font-medium rounded-xl transition"
@@ -402,10 +373,6 @@ export default function AudioPlayer({
               </div>
             </div>
           </motion.div>
-
-
-
-          
         </motion.div>
       )}
     </div>
