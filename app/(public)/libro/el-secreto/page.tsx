@@ -239,17 +239,17 @@ export default function BookDetailPage() {
     price: { oneTime: 1000 },
     totalDuration: "3h 45min",
     chapters: [
-      { id: 'intro', title: 'Introducción', duration: '3:05', durationSeconds: 252, src: '/audios/elsecreto/1-elsecreto-revelado.mp3', isPreview: true, description: 'Bienvenido al viaje del descubrimiento' },
-      { id: 'cap1', title: 'El Secreto Revelado', duration: '2:19', durationSeconds: 139, src: '/audios/elsecreto/2-elsecreto-revelado.mp3', isPreview: false },
-      { id: 'cap2', title: 'El Secreto Revelado 2', duration: '2:01', durationSeconds: 121, src: '/audios/elsecreto/3-elsecreto-revelado.mp3', isPreview: false },
-      { id: 'cap3', title: 'próximamente... Cómo Usar El Secreto', duration: '9:15', durationSeconds: 555, src: '/audios/elsecreto/c.mp3', isPreview: false },
-      { id: 'cap4', title: 'próximamente... Procesos Poderosos', duration: '7:20', durationSeconds: 440, src: '/audios/elsecreto/c.mp3', isPreview: false },
-      { id: 'cap5', title: 'próximamente... El Secreto del Dinero', duration: '8:00', durationSeconds: 480, src: '/audios/elsecreto/c.mp3', isPreview: false },
-      { id: 'cap6', title: 'próximamente... El Secreto de las Relaciones', duration: '7:45', durationSeconds: 465, src: '/audios/elsecreto/c.mp3', isPreview: false },
-      { id: 'cap7', title: 'próximamente... El Secreto de la Salud', duration: '6:30', durationSeconds: 390, src: '/audios/elsecreto/c.mp3', isPreview: false },
-      { id: 'cap8', title: 'próximamente... El Secreto para Ti', duration: '5:50', durationSeconds: 350, src: '/audios/elsecreto/c.mp3', isPreview: false },
-      { id: 'cap9', title: 'próximamente... El Secreto para el Mundo', duration: '6:10', durationSeconds: 370, src: '/audios/elsecreto/c.mp3', isPreview: false },
-      { id: 'epilogo', title: 'próximamente... Epílogo: Ahora Es Tu Turno', duration: '4:30', durationSeconds: 270, src: '/audios/elsecreto/c.mp3', isPreview: false },
+      { id: 'intro', title: 'prólogo', duration: '5:11', durationSeconds: 311, src: '/audios/elsecreto/1_prologo-elsecreto.mp3', isPreview: true, description: 'Bienvenido al viaje del descubrimiento' },
+      { id: 'cap1', title: 'próximamente... Capítulo 1', duration: '2:19', durationSeconds: 139, src: '/audios/elsecreto/c.mp3', isPreview: false },
+      { id: 'cap2', title: 'próximamente... Capítulo 2', duration: '2:01', durationSeconds: 121, src: '/audios/elsecreto/c.mp3', isPreview: false },
+      { id: 'cap3', title: 'próximamente... Capítulo 3', duration: '9:15', durationSeconds: 555, src: '/audios/elsecreto/c.mp3', isPreview: false },
+      { id: 'cap4', title: 'próximamente... Capítulo 4', duration: '7:20', durationSeconds: 440, src: '/audios/elsecreto/c.mp3', isPreview: false },
+      { id: 'cap5', title: 'próximamente... Capítulo 5', duration: '8:00', durationSeconds: 480, src: '/audios/elsecreto/c.mp3', isPreview: false },
+      { id: 'cap6', title: 'próximamente... Capítulo 6', duration: '7:45', durationSeconds: 465, src: '/audios/elsecreto/c.mp3', isPreview: false },
+      { id: 'cap7', title: 'próximamente... Capítulo 7', duration: '6:30', durationSeconds: 390, src: '/audios/elsecreto/c.mp3', isPreview: false },
+      { id: 'cap8', title: 'próximamente... Capítulo 8', duration: '5:50', durationSeconds: 350, src: '/audios/elsecreto/c.mp3', isPreview: false },
+      { id: 'cap9', title: 'próximamente... Capítulo 9', duration: '6:10', durationSeconds: 370, src: '/audios/elsecreto/c.mp3', isPreview: false },
+      { id: 'epilogo', title: 'próximamente... Epílogo', duration: '4:30', durationSeconds: 270, src: '/audios/elsecreto/c.mp3', isPreview: false },
     ]
   };
 

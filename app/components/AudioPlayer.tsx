@@ -338,7 +338,7 @@ export default function AudioPlayer({
           <span className="hidden sm:inline">{isPlaying ? "Pausa" : "Reproducir"}</span>
         </motion.button>
 
-        {/* Icono de lock en preview */}
+        {/* Icono de lock en preview 
         {isPreview && (
           <motion.button
             whileTap={{ scale: 0.95 }}
@@ -349,7 +349,7 @@ export default function AudioPlayer({
           >
             <Lock size={18} />
           </motion.button>
-        )}
+        )}*/}
       </div>
 
       {/* 👇 NUEVO: Hint de atajos de teclado (solo desktop) */}
@@ -402,6 +402,10 @@ export default function AudioPlayer({
               </div>
             </div>
           </motion.div>
+
+
+
+          
         </motion.div>
       )}
     </div>
